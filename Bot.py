@@ -2,6 +2,7 @@ import random
 import copy
 from AStar import *
 from BMTron import *
+from models import *
 
 
 class Evaluation:
@@ -57,15 +58,51 @@ class BotConfig:
 
 
 class TronBot:
+    """The only internal state is the game state"""
+    def __init__(self, game: BMTron):
+        self.game = game
+
+    def bot_move(self) -> Directions:
+        """Pick the move to use based on the current game state"""
+        raise NotImplementedError()
+
+class ReinforcementBot(TronBot):
+
+    def __init__(self, game, model_path):
+        super().__init__(game)
+        self.model = get_model(model_path)
+
+    def bot_move(self):
+        #JANK ASS PLAYER NUMS
+        model_output = get_reinforcement_model_inference(self.model, self.game, 1)
+        self.game.update_direction(1, Directions(model_output))
+
+class ImitationBot(TronBot):
+
+    def __init__(self, game, model_path):
+        super().__init__(game)
+        self.model = get_model(model_path)
+
+    def bot_move(self):
+        #JANK ASS PLAYER NUMS
+        model_output = get_imitation_model_inference(self.model, self.game, 1)
+        self.game.update_direction(1, Directions(model_output))
+
+class RandomBot(TronBot):
+    def __init__(self, game):
+        super().__init__(game)
+
+    def bot_move(self):
+        self.game.update_direction(1, Directions(random.randrange(0,3)))
+
+class MiniMaxBot(TronBot):
 
     def __init__(self, game):
-
-        self.game = game
-        self.unit_coords = [[0, 1], [1, 0], [0, -1], [-1, 0]]
+        super().__init__(game)
 
     def bot_move(self):
 
-        direction = self.choose_bot_move(1, BotConfig(look_ahead=1, depth=1, quadrant_all_weight=True))
+        direction = self.choose_bot_move(0, BotConfig(look_ahead=1, depth=1, quadrant_all_weight=True))
 
         if direction is not None:
             self.game.update_direction(2, direction)

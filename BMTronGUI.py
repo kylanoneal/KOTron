@@ -1,9 +1,14 @@
+from typing import Optional
+
 import pygame
 import pickle
 from Bot import *
 from BMTron import *
-from FeatureCollection import collect_feat
+from models import collect_feat
 from copy import deepcopy
+
+from models import DirectionNetConv
+
 
 
 class BMTronGUI:
@@ -21,13 +26,13 @@ class BMTronGUI:
     WIDTH = 800
     SPEED = 500
 
-    def __init__(self, is_bot=False, collect_trn_data=True):
+    def __init__(self, game: BMTron, bot: Optional[TronBot], collect_trn_data=False):
 
         pygame.init()
         self.collect_trn_data = collect_trn_data
-        self.game = BMTron(2)
-        self.is_bot = is_bot
-        self.bot = TronBot(self.game) if is_bot else None
+        # self.bot = ImitationBot(self.game) if is_bot else None
+        self.game = game
+        self.bot = bot
         self.SCORES = [0, 0, 0, 0]
         self.COLORS = [self.PURPLE, self.BLUE, self.RED, self.WHITE]
         self.screen_factor = self.LENGTH / self.game.dimension
@@ -56,7 +61,8 @@ class BMTronGUI:
                 if event.type == pygame.KEYDOWN:
                     self.handle_keydown(event.key)
 
-            if self.game.game_running:
+            if not self.game.winner_found:
+
                 if self.collect_trn_data:
                     #print("APPENDING MOVE")
                     kylan_moves.append((deepcopy(self.game.collision_table),
@@ -68,7 +74,10 @@ class BMTronGUI:
                     self.game.move_racers()
                     if self.bot is not None:
                         self.bot.bot_move()
-                if self.game.check_for_winner() and not self.score_updated:
+
+                self.game.check_for_winner()
+
+                if self.game.winner_found and not self.score_updated:
                     self.update_score()
                     self.score_updated = True
 
@@ -78,47 +87,46 @@ class BMTronGUI:
         if self.collect_trn_data:
             collect_feat(kylan_moves)
 
+    #CHANGE TO USE "GET_WINNER FUNCTION"
     def update_score(self):
-        for i in range(len(self.game.players)):
-            if self.game.players[i].can_move:
-                self.SCORES[i] += 1
+        self.SCORES[self.game.winner_player_num] += 1
 
     def handle_keydown(self, key):
 
         if key is pygame.K_w:
-            self.game.update_direction(1, Directions.up)
+            self.game.update_direction(0, Directions.up)
 
         if key is pygame.K_a:
-            self.game.update_direction(1, Directions.left)
+            self.game.update_direction(0, Directions.left)
 
         if key is pygame.K_s:
-            self.game.update_direction(1, Directions.down)
+            self.game.update_direction(0, Directions.down)
 
         if key is pygame.K_d:
-            self.game.update_direction(1, Directions.right)
+            self.game.update_direction(0, Directions.right)
 
         if key is pygame.K_i:
-            self.game.update_direction(2, Directions.up)
+            self.game.update_direction(1, Directions.up)
 
         if key is pygame.K_j:
-            self.game.update_direction(2, Directions.left)
+            self.game.update_direction(1, Directions.left)
 
         if key is pygame.K_k:
-            self.game.update_direction(2, Directions.down)
+            self.game.update_direction(1, Directions.down)
 
         if key is pygame.K_l:
-            self.game.update_direction(2, Directions.right)
+            self.game.update_direction(1, Directions.right)
         if key is pygame.K_t:
-            self.game.update_direction(3, Directions.up)
+            self.game.update_direction(2, Directions.up)
 
         if key is pygame.K_f:
-            self.game.update_direction(3, Directions.left)
+            self.game.update_direction(2, Directions.left)
 
         if key is pygame.K_g:
-            self.game.update_direction(3, Directions.down)
+            self.game.update_direction(2, Directions.down)
 
         if key is pygame.K_h:
-            self.game.update_direction(3, Directions.right)
+            self.game.update_direction(2, Directions.right)
         if key is pygame.K_r:
             self.restart()
         if key is pygame.K_e:
@@ -145,7 +153,10 @@ class BMTronGUI:
 
     def restart(self):
         self.game = BMTron(2)
-        self.bot = TronBot(self.game) if self.is_bot else None
+
+        if self.bot:
+            self.bot.game = self.game
+
         self.score_updated = False
 
     def reset_score(self):
@@ -246,5 +257,8 @@ class BMTronGUI:
 
 
 if __name__ == "__main__":
-    game = BMTronGUI()
+    game = BMTron(2)
+    bot = ReinforcementBot(game, "reinforcement_model.pth")
+
+    game = BMTronGUI(game, bot, collect_trn_data=True)
     game.main()

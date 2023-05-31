@@ -21,14 +21,15 @@ class Directions(Enum):
 class BMTron:
     DIRECTIONS = [[0, -1], [1, 0], [0, 1], [-1, 0]]
 
-    def __init__(self, num_players, random_starts=False):
+    def __init__(self, num_players=2, random_starts=False):
 
         self.dimension = 40
         self.collision_table = BMTron.build_collision_table(self.dimension)
 
         self.players = []
         self.build_racers(num_players, self.get_starting_positions(num_players, random_starts))
-        self.game_running = True
+        self.winner_found = False
+        self.winner_player_num = None
         # self.print_collision_table()
         # self.print_info()
 
@@ -124,15 +125,16 @@ class BMTron:
 
     def update_direction(self, player_num, direction):
         assert (isinstance(direction, Directions))
-        if not direction is self.get_opposite_direction(self.players[player_num - 1].direction):
-            self.players[player_num - 1].direction = direction
+        if not self.are_opposite_directions(self.players[player_num].direction, direction):
+            self.players[player_num].direction = direction
 
-    def get_opposite_direction(self, direction):
-        new_direction = direction.value + 2
-
+    @staticmethod
+    def are_opposite_directions(d1, d2):
+        new_direction = d1.value + 2
         new_direction = new_direction - 4 if new_direction > 3 else new_direction
+        new_direction = Directions(new_direction)
+        return new_direction == d2
 
-        return Directions(new_direction)
 
     def check_for_winner(self):
         i = 0
@@ -142,11 +144,23 @@ class BMTron:
             if racer.can_move:
                 i += 1
 
-        if i == 1 or i == 0:
-            self.game_running = False
-            return True
+        #JANK FUNCTION
+        #More than 1 player can move, game continues
+        if i > 1:
+            return
+        else:
+            self.winner_found = True
+            if i == 1:
+                for player_num in range(len(self.players)):
+                    if self.players[player_num].can_move:
+                        self.winner_player_num = player_num
+            else:
+                #Tie case
+                self.winner_player_num = -1
 
-        return False
+
+
+    
 
     def print_info(self):
         print(self.players)
