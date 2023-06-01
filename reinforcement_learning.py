@@ -8,19 +8,21 @@ from MCTS import *
 
 from UtilityGUI import show_game_state
 
+
 device = "cuda" if torch.cuda.is_available() else "cpu"
-model = DirectionValueNetConv().to(device)
-mcts = MCTS(model, n_simulations=20, exploration_factor=0.000001)
+print("DEVICE: ", device)
+model = torch.load("reinforcement_model_5.pth").to(device)
+mcts = MCTS(model, n_simulations=20, exploration_factor=5)
+
 
 def game_loop():
-
     num_players = 2
-    game_iterations = 100
+    game_iterations = 1000
 
     for i in range(game_iterations):
 
-        #print("MCTS model weights")
-        #print_weights_sum_of_squares(mcts.model)
+        # print("MCTS model weights")
+        # print_weights_sum_of_squares(mcts.model)
         print("GAME ITERATION:", i, "\n\n\n")
 
         game_data = []
@@ -32,8 +34,16 @@ def game_loop():
 
             for player_num in range(num_players):
                 root_node = Node(game, player_num)
-                action_probs = mcts.search(root_node)
-                print("MCTS action probs:", action_probs)
+                actions, action_probs = mcts.search(root_node)
+                #print("LENGTH OF ACTIONS:", len(actions))
+
+                # all_action_probs = np.zeros(4) if len(actions) > 0 else EQUAL_ACTION_PROBS
+                #
+                # for i in range(len(actions)):
+                #     all_action_probs[actions[i].value] = action_probs[i]
+
+                #print("action probs shape:", all_action_probs.shape)
+                # print("MCTS action probs:", action_probs)
 
                 action = Directions(np.random.choice(range(4), size=1, p=action_probs))
                 game.update_direction(player_num, action)
@@ -48,30 +58,37 @@ def game_loop():
             show_game_state(game)
 
         winner_player_num = game.winner_player_num
-        print("Winner player num:", winner_player_num)
+        # print("Winner player num:", winner_player_num)
 
         labeled_game_data = []
+
+        decay_factor = 0.95
+        curr_decay = 1
+        # Start with the ending moves and decay towards the start
+        game_data.reverse()
         for turn in game_data:
+
             for player_num, (model_input, action_probs) in enumerate(turn):
                 if winner_player_num == -1:
                     evaluation = 0
                 else:
-                    evaluation = 1 if player_num == winner_player_num else -1
+                    evaluation = curr_decay if player_num == winner_player_num else -curr_decay
                 labeled_game_data.append((model_input, action_probs, evaluation))
 
-        training(labeled_game_data)
-        #print("after training:")
-        #print_weights_sum_of_squares(model)
+            curr_decay *= decay_factor
+        #training(labeled_game_data)
+        # print("after training:")
+        # print_weights_sum_of_squares(model)
 
-    torch.save(model, "reinforcement_model.pth")
+    torch.save(model, "reinforcement_model_6.pth")
+
 
 def training(data):
-
     # Define the optimizer
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
     # Number of epochs
-    n_epochs = 10  # Modify as needed
+    n_epochs = 5  # Modify as needed
 
     print("TRAINING DIS SHIT")
     # Training loop
@@ -79,16 +96,13 @@ def training(data):
         epoch_loss = 0
 
         for state, action_probs, value_estimate in data:
-
             # Convert outputs to tensors and move them to the device
             action_probs = torch.tensor(action_probs).reshape((1, 4)).to(device)
 
             value_estimate = torch.tensor(value_estimate, dtype=torch.float32).reshape((1, 1)).to(device)
 
-
             # Forward pass
             predicted_action_probs, predicted_value_estimate = model(state)
-
 
             # Define the loss function (CrossEntropy for action probs, MSE for value estimates)
             loss = F.cross_entropy(predicted_action_probs, action_probs) + \
@@ -111,5 +125,8 @@ def print_weights_sum_of_squares(model):
         if param.requires_grad and param.data is not None:
             total_sum_of_squares += torch.sum(param.data.pow(2))
     print("Sum of squares of weights:", total_sum_of_squares.item())
+
+
 if __name__ == '__main__':
+    print("CUDA AVAILABLE?", torch.cuda.is_available())
     game_loop()

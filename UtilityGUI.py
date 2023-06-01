@@ -14,7 +14,7 @@ BLUE = [0, 0, 255]
 PURPLE = [255, 0, 255]
 RED = [255, 0, 0]
 
-COLORS = [BLUE, PURPLE, RED]
+COLORS = [BLUE, PURPLE, RED, BLACK]
 
 pygame.init()
 screen = pygame.display.set_mode([LENGTH, WIDTH])
@@ -40,5 +40,9 @@ def show_game_state(game):
                     color = COLORS[1]
                     screen.fill(color, pygame.Rect(x, y, SCREEN_FACTOR, SCREEN_FACTOR))
 
+    for racer in game.players:
+        headx, heady = racer.head[0] * SCREEN_FACTOR, racer.head[1] * SCREEN_FACTOR
+        screen.fill(BLACK, pygame.Rect(headx, heady, SCREEN_FACTOR, SCREEN_FACTOR))
+
+    pygame.event.pump()
     pygame.display.flip()
-    clock.tick(SPEED)
