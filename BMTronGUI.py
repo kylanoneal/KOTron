@@ -4,10 +4,10 @@ import pygame
 import pickle
 from Bot import *
 from BMTron import *
-from models import collect_feat
+from pytorch_models import collect_feat
 from copy import deepcopy
 
-from models import DirectionNetConv
+from pytorch_models import DirectionNetConv
 
 
 

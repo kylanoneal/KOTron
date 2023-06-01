@@ -2,7 +2,7 @@ import random
 import copy
 from AStar import *
 from BMTron import *
-from models import *
+from pytorch_models import *
 
 
 class Evaluation:

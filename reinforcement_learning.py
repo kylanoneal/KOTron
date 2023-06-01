@@ -1,7 +1,7 @@
 import torch
 
 from BMTron import *
-from models import *
+from pytorch_models import *
 from model_architectures import *
 
 from MCTS import *

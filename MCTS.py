@@ -1,7 +1,7 @@
 import numpy as np
 from copy import deepcopy
 from BMTron import *
-from models import get_model_input_from_game_state
+from pytorch_models import get_model_input_from_game_state
 
 EQUAL_ACTION_PROBS = np.array([0.25, 0.25, 0.25, 0.25])
 class Node:
