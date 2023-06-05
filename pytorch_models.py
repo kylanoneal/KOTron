@@ -12,9 +12,10 @@ import seaborn as sns
 
 import json
 
-device = "cuda" if torch.cuda.is_available() else "cpu"
+MODEL_INPUT_DIMENSION = 42
 
-import json
+device = "cpu" if torch.cuda.is_available() else "cpu"
+
 
 def collect_feat(move_list):
     # Change racer values to 1
@@ -22,7 +23,7 @@ def collect_feat(move_list):
     processed_moves = []
     for grid, head, dir in move_list:
 
-        padded_grid = get_processed_grid(grid, head)
+        padded_grid = get_processed_grids(grid, head)
 
 
         # print("Fully processed grid:", padded_grid)
@@ -30,38 +31,62 @@ def collect_feat(move_list):
         processed_moves.append((padded_grid, head, dir))
 
 
-
-
     print("Total moves collected:", len(processed_moves))
     with open("kylan_moves_vs_troy.json", "w") as file:
         json.dump(processed_moves, file)
 
 
-def get_processed_grid(grid, head):
-    binary_grid = [[1 if element != 0 else 0 for element in row] for row in grid]
-    binary_grid[head[0]][head[1]] = -1
+def get_processed_grids(game, player_num):
+
     # print("Binary GRid:", binary_grid)
     # Create a new 42x42 list filled with padding value 0
-    padded_grid = [[1] * 42 for _ in range(42)]
+    padded_body_grid = [[1] * (MODEL_INPUT_DIMENSION) for _ in range(MODEL_INPUT_DIMENSION)]
 
-    for i in range(40):
-        for j in range(40):
-            padded_grid[i + 1][j + 1] = binary_grid[i][j]
 
-    return padded_grid
+    #padded_head_grid = [[0] * (MODEL_INPUT_DIMENSION) for _ in range(MODEL_INPUT_DIMENSION)]
+    
+    pad_offset = (MODEL_INPUT_DIMENSION - game.dimension) // 2
+
+
+    #Create body grid
+    for i in range(game.dimension):
+        for j in range(game.dimension):
+            val = 0 if game.collision_table[i][j] == 0 else 1
+            padded_body_grid[i + pad_offset][j + pad_offset] = val
+
+
+
+    #Create head grid
+    for curr_player_num, (x, y) in enumerate(game.get_heads()):
+        # print("Head value on body grid:", padded_body_grid[x+pad_offset][y+pad_offset])
+        # print("at inverse val on body grid:", padded_body_grid[y+pad_offset][x+pad_offset])
+        # print("Head value on collision grid:", game.collision_table[x][y])
+        # print("at inverse val on collision grid:", game.collision_table[y][x])
+        padded_body_grid[x + pad_offset][y + pad_offset] = -10 if player_num == curr_player_num else 10
+
+    # print("BODY GRID: \n\n")
+    # print_readable_grid(padded_body_grid)
+    #print("HEAD GRID:\n\n")
+    #print_readable_grid(padded_head_grid)
+    return padded_body_grid
+
+def print_readable_grid(grid):
+    transposed_grid = list(zip(*grid))
+
+    # Print the transposed grid
+    for row in transposed_grid:
+        print(row)
 
 def get_model_input_from_game_state(game_state, player_num):
-    head = game_state.players[player_num].head
-    head_x, head_y = head
-    padded_grid = get_processed_grid(game_state.collision_table, head)
-    #print("HEAD X AND Y:", head_x, head_y)
-    #print("Collision table at those indexes:", game_state.collision_table[head_x][head_y])
-    #print("at inverse indexes:", game_state.collision_table[head_y][head_x])
-    padded_grid[head_x][head_y] = -1
-    tensor_grid = torch.tensor(padded_grid, dtype=torch.float32).to(device)
-    tensor_grid = tensor_grid.view(1, 42, 42)
-    tensor_grid = tensor_grid.unsqueeze(1)
-    return tensor_grid
+
+    padded_grids = get_processed_grids(game_state, player_num)
+
+
+    tensor_grids = torch.tensor(padded_grids, dtype=torch.float32).to(device)
+    tensor_grids = tensor_grids.view(1, MODEL_INPUT_DIMENSION, MODEL_INPUT_DIMENSION)
+    tensor_grids = tensor_grids.unsqueeze(0)
+
+    return tensor_grids
 
 def get_imitation_model_inference(model, game_state, player_num):
     model_output = model(get_model_input_from_game_state(game_state, player_num))

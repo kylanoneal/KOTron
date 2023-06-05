@@ -46,6 +46,7 @@ class MCTS:
         for _ in range(self.n_simulations):
             root.n_visits += 1
             leaf = self.find_best_leaf(root)
+            #print("Depth of leaf:", self.count_depth_of_node(leaf))
             action_priors, value = self.model(get_model_input_from_game_state(leaf.state, leaf.player_num))
             leaf.expand(action_priors, value)
             self.backpropagate(leaf, value)
@@ -64,13 +65,18 @@ class MCTS:
         #print("node children length:", len(node.children.items()))
         for action, child in node.children.items():
             ## POSSIBLE JANK
-            if child.n_visits == 0:
-                ucb1_value = float('inf')  # Encourage exploration
-            else:
-                _, child_value = self.model(get_model_input_from_game_state(child.state, child.player_num))
-                
-                ucb1_value = (child.total_reward / child.n_visits) + child_value + \
-                             np.sqrt(self.exploration_factor * np.log(node.n_visits) / child.n_visits)
+
+            #IF CHILD UNVISITED ALWAYS VISIT
+            # if child.n_visits == 0:
+            #     ucb1_value = float('inf')  # Encourage exploration
+            # else:
+
+            #Trying without above approach, adding 1 to child.n_visits in order to avoid divide by zero
+            curr_child_visits = child.n_visits + 1
+            _, child_value = self.model(get_model_input_from_game_state(child.state, child.player_num))
+
+            ucb1_value = (child.total_reward / curr_child_visits) + child_value + \
+                         np.sqrt(self.exploration_factor * np.log(node.n_visits) / curr_child_visits)
             #print("Current best value: ", best_value, " current ucb1 value: ", ucb1_value)
             if ucb1_value > best_value:
                 best_value = ucb1_value
@@ -78,6 +84,13 @@ class MCTS:
                 best_child = child
         return best_action, best_child
 
+    def count_depth_of_node(self, node) -> int:
+        count = 0
+        while node.parent:
+            count += 1
+            node = node.parent
+
+        return count
     def backpropagate(self, node, value):
         if node.parent:
             node.total_reward += value - node.value
@@ -88,7 +101,7 @@ class MCTS:
         visits = np.array([child.n_visits for child in node.children.values()])
         #print("VISITS:", visits)
         actions = list(node.children.keys())
-        #print("Actions: ", actions)
+        #print("Actions: ", actions, "\n")
 
         all_action_probs = np.zeros(4) if len(actions) > 0 else EQUAL_ACTION_PROBS
 

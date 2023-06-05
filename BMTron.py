@@ -21,9 +21,9 @@ class Directions(Enum):
 class BMTron:
     DIRECTIONS = [[0, -1], [1, 0], [0, 1], [-1, 0]]
 
-    def __init__(self, num_players=2, random_starts=False):
+    def __init__(self, num_players=2, dimension=40, random_starts=False):
 
-        self.dimension = 40
+        self.dimension = dimension
         self.collision_table = BMTron.build_collision_table(self.dimension)
 
         self.players = []

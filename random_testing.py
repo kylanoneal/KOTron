@@ -1,8 +1,7 @@
 from BMTron import *
+from pytorch_models import *
 
 if __name__ == '__main__':
-    decay = 0.99
-    curr_decay = 1
-    for i in range(500):
-        curr_decay *= decay
-        print(curr_decay)
+    game = BMTron(num_players=2, dimension=20)
+    input = get_model_input_from_game_state(game_state=game, player_num=0)
+    print(input.shape)
