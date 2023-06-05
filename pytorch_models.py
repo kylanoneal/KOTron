@@ -14,7 +14,7 @@ import json
 
 MODEL_INPUT_DIMENSION = 42
 
-device = "cpu" if torch.cuda.is_available() else "cpu"
+device = "cuda" if torch.cuda.is_available() else "cpu"
 
 
 def collect_feat(move_list):

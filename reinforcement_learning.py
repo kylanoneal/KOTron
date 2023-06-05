@@ -24,7 +24,7 @@ ITERATIONS_BEFORE_LOGGING = 50
 # Default `log_dir` is "runs" - we'll be more specific here
 writer = SummaryWriter('runs/converging')
 
-device = "cpu" if torch.cuda.is_available() else "cpu"
+device = "cuda" if torch.cuda.is_available() else "cpu"
 print("DEVICE: ", device)
 # model = torch.load("reinforcement_model_5.pth", map_location=torch.device(device))
 # model = torch.load("checkpoints/20x20_model06-02-17-30", map_location=torch.device(device))
