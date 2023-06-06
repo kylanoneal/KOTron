@@ -15,14 +15,14 @@ import torch.optim as optim
 
 import cProfile
 
-TEMP_REDUCTION_FACTOR = 0.999
+TEMP_DECAY_FACTOR = 1
 INITIAL_TEMP = 0.2
-MAX_GAME_ITERATIONS = 1000
+MAX_GAME_ITERATIONS = 2500
 
 ITERATIONS_BEFORE_LOGGING = 50
 
 # Default `log_dir` is "runs" - we'll be more specific here
-writer = SummaryWriter('runs/converging')
+writer = SummaryWriter('runs/cubic-decay-temp-2e-1-no-decay-additional-conv-channels-no-max-pool')
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print("DEVICE: ", device)
@@ -35,6 +35,7 @@ mcts = MCTS(model, n_simulations=4, exploration_factor=0.5)
 current_game_iteration = 0
 cumulative_loss = 0
 cumulative_game_lengths = 0
+cumulative_diff_from_zero = 0
 
 
 def game_loop():
@@ -91,14 +92,15 @@ def game_loop():
         cumulative_game_lengths += len(game_data)
 
         for turn_num, turn in enumerate(game_data):
-            value_magnitude = turn_num / len(game_data)
+            game_progress = turn_num / len(game_data)
             for player_num, model_input in enumerate(turn):
                 # print("printing head locs:")
                 # print_head_locations(model_input)
                 if winner_player_num == -1:
                     evaluation = 0
                 else:
-                    evaluation = value_magnitude if player_num == winner_player_num else -value_magnitude
+                    eval_magnitude = decay_function(game_progress)
+                    evaluation = eval_magnitude if player_num == winner_player_num else -eval_magnitude
                 labeled_game_data.append((model_input, evaluation))
 
             curr_decay *= decay_factor
@@ -114,9 +116,9 @@ def game_loop():
             formatted_datetime = current_datetime.strftime("%m-%d-%H-%M")
             torch.save(model, "checkpoints/20x20_model" + formatted_datetime)
 
-            non_tensor_data = [(model_input.tolist(), evaluation) for model_input, evaluation in game_dataset]
-            with open("game_simulation_data/game_sims" + formatted_datetime + ".json", 'w') as file:
-                json.dump(non_tensor_data, file)
+            # non_tensor_data = [(model_input.tolist(), evaluation) for model_input, evaluation in game_dataset]
+            # with open("game_simulation_data/game_sims" + formatted_datetime + ".json", 'w') as file:
+            #     json.dump(non_tensor_data, file)
 
             # Clear list after outputting to file
             game_dataset = []
@@ -124,15 +126,20 @@ def game_loop():
         print("after training:")
         print_weights_sum_of_squares(model)
 
+def decay_function(game_progress: float) -> float:
+    """Give game progress from 0.0 - 1.0, decay the importance by cubing the input"""
+    return game_progress ** 3
+
 
 def update_tensorboard():
-    global cumulative_loss, cumulative_game_lengths
+    global cumulative_loss, cumulative_game_lengths, cumulative_diff_from_zero
 
     if (current_game_iteration + 1) % ITERATIONS_BEFORE_LOGGING == 0:
         writer.add_scalar('Avg length of game', cumulative_game_lengths / ITERATIONS_BEFORE_LOGGING, current_game_iteration)
-        writer.add_scalar('training loss', cumulative_loss / ITERATIONS_BEFORE_LOGGING, current_game_iteration)
-        cumulative_game_lengths = 0
-        cumulative_loss = 0
+        writer.add_scalar('Training loss', cumulative_loss / ITERATIONS_BEFORE_LOGGING, current_game_iteration)
+        writer.add_scalar('Predictions diff from zero', cumulative_diff_from_zero / ITERATIONS_BEFORE_LOGGING, current_game_iteration)
+        cumulative_game_lengths = cumulative_loss = cumulative_diff_from_zero = 0
+
 
 
 def print_head_locations(model_input):
@@ -175,7 +182,7 @@ def get_next_action(game, player_num):
         # evaluations = np.array(evaluations)
         # print("evaluations:", evaluations)
 
-        temperature = INITIAL_TEMP * (TEMP_REDUCTION_FACTOR ** current_game_iteration)
+        temperature = INITIAL_TEMP * (TEMP_DECAY_FACTOR ** current_game_iteration)
         # change this value to control randomness
 
         exp_values = np.exp(np.array(evaluations) / temperature)
@@ -208,11 +215,13 @@ def training(data):
     n_epochs = 1  # Modify as needed
 
     global cumulative_loss
+    global cumulative_diff_from_zero
 
     print("TRAINING...")
     # Training loop
     for epoch in range(n_epochs):
         epoch_loss = 0
+        epoch_diff_from_zero = 0
 
         random.shuffle(data)
         for state, state_value in data:
@@ -226,12 +235,13 @@ def training(data):
             # Forward pass
             predicted_value_estimate = model(state)
 
+            epoch_diff_from_zero += np.abs(0 - predicted_value_estimate.item())
             # Define the loss function (CrossEntropy for action probs, MSE for value estimates)
 
             # Ignoring Action Probs for now
             # action_probs_loss = F.cross_entropy(predicted_action_probs, action_probs)
 
-            # print("Preicted vs actual state values: ", predicted_value_estimate, state_value)
+            #print("Preicted vs actual state values: ", predicted_value_estimate, state_value)
 
             value_loss = loss_function(predicted_value_estimate, state_value)
             value_loss.backward()
@@ -241,6 +251,7 @@ def training(data):
             epoch_loss += value_loss.item()
 
         cumulative_loss += epoch_loss / len(data)
+        cumulative_diff_from_zero += epoch_diff_from_zero / len(data)
 
         print(f'Epoch {epoch + 1}/{n_epochs}, Loss: {epoch_loss / len(data)}')
 
