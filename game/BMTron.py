@@ -93,16 +93,27 @@ class BMTron:
         return racer.head[0] + dx, racer.head[1] + dy
 
     def move_racers(self):
+
         for player_num, racer in enumerate(self.players):
             if racer.can_move:
                 new_x, new_y = self.get_next_square(racer)
                 has_collided = not self.is_in_bounds_and_empty(new_x, new_y)
 
+
                 if has_collided:
                     racer.can_move = False
                 else:
                     racer.head = (new_x, new_y)
-                    self.collision_table[new_x][new_y] = player_num + 1
+
+        for player_num, racer in enumerate(self.players):
+            if racer.can_move:
+                head_x, head_y = racer.head
+                if self.collision_table[head_x][head_y] != 0:
+                    racer.can_move = False
+                    self.players[self.collision_table[head_x][head_y] - 1].can_move = False
+
+                self.collision_table[head_x][head_y] = player_num + 1
+
 
     def in_bounds(self, x, y):
         return 0 <= x < self.dimension and 0 <= y < self.dimension

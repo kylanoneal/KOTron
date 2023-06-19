@@ -4,14 +4,15 @@ import seaborn as sns
 import numpy as np
 
 import json
+from copy import deepcopy
 
 from typing import Callable, Optional
 
-from AI.model_architectures import *
+from model_architectures import *
 
 MODEL_INPUT_DIMENSION = 40
 
-device = "cpu" if torch.cuda.is_available() else "cpu"
+device = "cuda" if torch.cuda.is_available() else "cpu"
 
 
 def collect_feat(move_list):
@@ -69,28 +70,36 @@ def print_readable_grid(grid):
 
 
 def get_relevant_info_from_game_state(game_state):
-    return game_state.collision_table, game_state.get_heads()
+    return deepcopy(game_state.collision_table), game_state.get_heads()
 
 
-def get_model_evaluation(decay_fn: Callable[[float], float], game_progress: float, won_lost_tied: int):
-    return torch.tensor(won_lost_tied * decay_fn(game_progress), dtype=torch.float32)
+def get_model_evaluation(decay_fn: Callable[[float], float], game_progress: float, won_lost_tied: int, is_tie_neutral=False):
+    if won_lost_tied == 0 and not is_tie_neutral:
+        eval = -1 * decay_fn(game_progress)
+    else:
+        eval = won_lost_tied * decay_fn(game_progress)
+
+    return torch.tensor(eval, dtype=torch.float32).to(device)
 
 
 def get_model_input_from_raw_info(grid, heads, player_num, model_type: Optional[type] = None, is_part_of_batch=False):
-    if len(grid) != MODEL_INPUT_DIMENSION:
-        raise NotImplementedError
-    else:
-        processed_grid = np.where(np.array(grid) == 0, 0, 1)
+    # if len(grid) != MODEL_INPUT_DIMENSION:
+    #     raise NotImplementedError
+    # else:
+    processed_grid = np.where(np.array(grid) == 0, 0, 1)
 
-        for p_num, (x, y) in enumerate(heads):
-            processed_grid[x][y] = 10 if player_num == p_num else -10
+    for p_num, (x, y) in enumerate(heads):
+        processed_grid[x][y] = 10 if player_num == p_num else -10
 
     tensor_output = torch.tensor(processed_grid, dtype=torch.float32).unsqueeze(0).to(device)
     if not is_part_of_batch:
         tensor_output = tensor_output.unsqueeze(0)
 
     if model_type is EvaluationAttentionConvNet:
-        return tensor_output, torch.tensor(heads[player_num])
+        tensor_heads = torch.tensor(heads[player_num]).to(device)
+        if not is_part_of_batch:
+            tensor_heads = tensor_heads.unsqueeze(0)
+        return tensor_output, tensor_heads
     else:
         return tensor_output
 
