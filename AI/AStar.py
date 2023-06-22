@@ -1,5 +1,5 @@
 from collections import defaultdict
-from game.BMTron import*
+from game.KyTron import*
 
 def reconstruct_path(cameFrom, current):
     total_path = [current]

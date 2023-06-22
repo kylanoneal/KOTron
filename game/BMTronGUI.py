@@ -1,8 +1,7 @@
 import pygame
 import pickle
-from Bot import *
-from BMTron import *
-from AI.pytorch_models import collect_feat
+from game.Bot import *
+from game.KyTron import *
 from copy import deepcopy
 
 
@@ -21,7 +20,7 @@ class BMTronGUI:
     WIDTH = 800
     SPEED = 500
 
-    def __init__(self, game: BMTron, bot: Optional[TronBot], collect_trn_data=False):
+    def __init__(self, game: BMTron, bot: Optional[TronBot]=None, collect_trn_data=False):
 
         pygame.init()
         self.collect_trn_data = collect_trn_data
@@ -147,7 +146,7 @@ class BMTronGUI:
         self.clock.tick(fps)
 
     def restart(self):
-        self.game = BMTron(2)
+        self.game = BMTron(2, dimension=20, random_starts=True)
 
         if self.bot:
             self.bot.game = self.game
@@ -252,8 +251,11 @@ class BMTronGUI:
 
 
 if __name__ == "__main__":
-    game = BMTron(2)
-    bot = ReinforcementBot(game, "../AI/old-monte-models/reinforcement_model.pth")
+    game = BMTron(2, dimension=20, random_starts=True)
+    bot = ReinforcementBot(game, "../AI/final-models/iteration-1229-full-model.pt")
 
-    game = BMTronGUI(game, bot, collect_trn_data=True)
+    game = BMTronGUI(game, bot, collect_trn_data=False)
     game.main()
+
+
+

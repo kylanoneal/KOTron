@@ -1,19 +1,7 @@
 
-from AI.reinforcement_learning import *
+from game.BMTronGUI import BMTronGUI
 
-
-# Move this somewhere else
-def print_head_locations(model_input):
-    np_input = model_input.numpy()
-    reshaped_array = np_input.reshape(2, 42, 42)
-    head_grid = reshaped_array[1]
-
-    for i in range(len(head_grid)):
-        for j in range(len(head_grid)):
-            if head_grid[i][j] == 1:
-                print("1 at ", i, j)
-            if head_grid[i][j] == -1:
-                print("-1 at: ", i, j)
+from game.Bot import *
 
 
 def test_attn_net():
@@ -120,7 +108,43 @@ if __name__ == '__main__':
     # test_process_game_data(game_data, winner_player_num)
     # test_process_json_data("test-game.json", lambda x: x**5, EvaluationNetConv2)
 
-    model = torch.load("../AI/checkpoints/conv-net-v2-20x20-temp-02-LR-0005/iteration-1229.pt")
+    print(id(Directions))
+    print(type(Directions))
+    print(type(Directions.up))
 
-    torch.save(model, "../AI/final-models/iteration-1229-full-model.pt")
+    d = Directions.up
+
+    print("id of d:", id(type(d)))
+    assert(isinstance(d, Directions))
+
+    d2 = get_direction_other_package()
+
+    print("id of d2:", id(type(d2)))
+    assert(isinstance(d2, Directions))
+
+    game_instance = BMTron(num_players=2)
+
+    d3 = game_instance.get_possible_directions(0)[0]
+
+    print("id of d3:", id(type(d3)))
+    assert(isinstance(d3, Directions))
+
+    bot = ReinforcementBot(game_instance, "bruh")
+    gui = BMTronGUI(game_instance, bot=bot)
+    d4 = gui.game.get_possible_directions(0)[0]
+
+
+    print("id of d4:", id(type(d4)))
+    assert(isinstance(d4, Directions))
+
+    d5 = gui.bot.game.get_possible_directions(0)[0]
+
+
+    print("id of d5:", id(type(d5)))
+    assert(isinstance(d5, Directions))
+
+    gui.bot.bot_move()
+
+
+
 

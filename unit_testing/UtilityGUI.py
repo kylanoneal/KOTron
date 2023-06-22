@@ -16,8 +16,7 @@ COLORS = [BLUE, PURPLE, RED, BLACK]
 # screen = pygame.display.set_mode([LENGTH, WIDTH])
 # clock = pygame.time.Clock()
 
-print("everything initialized")
-
+gui_initialized = False
 
 def init_utility_gui(game_dimension):
     global screen_factor, screen, clock
@@ -28,6 +27,12 @@ def init_utility_gui(game_dimension):
 
 
 def show_game_state(game):
+    global gui_initialized
+
+    if not gui_initialized:
+        init_utility_gui(game.dimension)
+        gui_initialized = True
+
     screen.fill([0, 255, 0])
     for racer in game.players:
         for i in range(game.dimension):
@@ -49,5 +54,5 @@ def show_game_state(game):
 
     pygame.event.pump()
     pygame.display.flip()
-    clock.tick()
+    clock.tick(20)
 

@@ -1,7 +1,7 @@
 import copy
 from AI.AStar import *
-from game.BMTron import *
-from AI.pytorch_models import *
+from game.KyTron import *
+from AI.pytorch_game_utils import *
 
 
 class Evaluation:
@@ -71,10 +71,12 @@ class ReinforcementBot(TronBot):
         super().__init__(game)
         self.model = get_model(model_path)
 
+
     def bot_move(self):
         #JANK ASS PLAYER NUMS
-        model_output = get_reinforcement_model_inference(self.model, self.game, 1)
-        self.game.update_direction(1, Directions(model_output))
+        action = get_reinforcement_model_next_action(self.model, self.game, 1)
+        print("bout to move XD reinforcement bot!! here:", action)
+        self.game.update_direction(1, action)
 
 class ImitationBot(TronBot):
 
@@ -101,10 +103,12 @@ class MiniMaxBot(TronBot):
 
     def bot_move(self):
 
-        direction = self.choose_bot_move(0, BotConfig(look_ahead=1, depth=1, quadrant_all_weight=True))
+        direction = get_direction_other_package()
+        print("bout to move XD reinforcement bot!! here:", direction)
+        #direction = self.choose_bot_move(0, BotConfig(look_ahead=1, depth=1, quadrant_all_weight=True))
 
         if direction is not None:
-            self.game.update_direction(2, direction)
+            self.game.update_direction(1, direction)
 
         # direction2 = self.choose_bot_move(0, BotConfig(look_ahead=1, depth = 2, consider_opponent= False))
         # for bot vs bot
@@ -133,7 +137,7 @@ class MiniMaxBot(TronBot):
 
             moves = []
 
-            possible_directions = self.get_possible_directions(game_state, player_index)
+            possible_directions = game_state.get_possible_directions(player_index)
 
             if len(possible_directions) == 0:
                 return self.evaluate(game_state, player_index, bot_config), None
@@ -200,7 +204,7 @@ class MiniMaxBot(TronBot):
         return "??????"
 
     def evaluate_position(self, game_state, player_index, bot_config):
-        possible_directions = self.get_possible_directions(game_state, player_index)
+        possible_directions = game_state.get_possible_directions(player_index)
 
         if len(possible_directions) == 0:
             return PlayerEvaluation.mininmum_score()
@@ -344,19 +348,19 @@ class MiniMaxBot(TronBot):
         else:
             return Directions(open_lane)
 
-    def get_possible_directions(self, game_state, player_index):
-
-        directions = []
-
-        for i in range(4):
-            head = game_state.players[player_index].head
-
-            x = head[0] + game_state.DIRECTIONS[i][0]
-            y = head[1] + game_state.DIRECTIONS[i][1]
-
-            if game_state.in_bounds([x, y]):
-
-                if game_state.collision_table[x][y] == 0:
-                    directions.append(Directions(i))
-
-        return directions
+    # def get_possible_directions(self, game_state, player_index):
+    #
+    #     directions = []
+    #
+    #     for i in range(4):
+    #         head = game_state.players[player_index].head
+    #
+    #         x = head[0] + game_state.DIRECTIONS[i][0]
+    #         y = head[1] + game_state.DIRECTIONS[i][1]
+    #
+    #         if game_state.in_bounds([x, y]):
+    #
+    #             if game_state.collision_table[x][y] == 0:
+    #                 directions.append(Directions(i))
+    #
+    #     return directions

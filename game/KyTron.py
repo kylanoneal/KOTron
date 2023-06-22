@@ -1,7 +1,6 @@
 import random
 from enum import Enum
 
-
 class Racer:
 
     def __init__(self, head, direction, can_move):
@@ -40,8 +39,12 @@ class BMTron:
         starts = []
 
         if random_starts:
-            for i in range(num_players):
-                starts.append([random.randrange(0, self.dimension), random.randrange(0, self.dimension)])
+            i = 0
+            while i < num_players:
+                random_start = (random.randrange(0, self.dimension), random.randrange(0, self.dimension))
+                if random_start not in starts:
+                    starts.append(random_start)
+                    i += 1
         else:
 
             half_dim = int(self.dimension * .5)
@@ -99,7 +102,6 @@ class BMTron:
                 new_x, new_y = self.get_next_square(racer)
                 has_collided = not self.is_in_bounds_and_empty(new_x, new_y)
 
-
                 if has_collided:
                     racer.can_move = False
                 else:
@@ -114,7 +116,6 @@ class BMTron:
 
                 self.collision_table[head_x][head_y] = player_num + 1
 
-
     def in_bounds(self, x, y):
         return 0 <= x < self.dimension and 0 <= y < self.dimension
 
@@ -122,7 +123,14 @@ class BMTron:
         return self.in_bounds(x, y) and self.collision_table[x][y] == 0
 
     def update_direction(self, player_num, direction):
-        assert (isinstance(direction, Directions))
+
+        print("player numero!!!:", player_num)
+        print("type of diredtion:", type(direction))
+        print("that directiON;", direction)
+        print(id(type(direction)))
+        print(id(Directions))
+
+        assert(isinstance(direction, Directions))
         if not self.are_opposite_directions(self.players[player_num].direction, direction):
             self.players[player_num].direction = direction
 
