@@ -1,8 +1,6 @@
-
 from AI.reinforcement_learning import *
+from game.UtilityGUI import *
 
-
-# Move this somewhere else
 def print_head_locations(model_input):
     np_input = model_input.numpy()
     reshaped_array = np_input.reshape(2, 42, 42)
@@ -24,9 +22,8 @@ def test_attn_net():
     print(type(model_input))
     print("model input grid shape:", model_input[0].shape, "heads shape:", model_input[1].shape)
     model = EvaluationAttentionConvNet().to(device)
-
-
     output = model(model_input)
+    print(output)
 
 def test_mask():
     shape = (1, 1, 20, 20)
@@ -97,7 +94,7 @@ def test_process_game_data(game_data, winner_player_num):
         print_2d_grid(grid)
 
 
-    with open("test-game.json", 'w') as file:
+    with open("AI/test-game.json", 'w') as file:
         json.dump(processed_game_data, file)
 
 
@@ -115,12 +112,9 @@ def test_process_json_data(filepath, decay_fn, model_type):
 
 
 if __name__ == '__main__':
-    # init_utility_gui(5)
-    # game_data, winner_player_num = test_simulate_game()
-    # test_process_game_data(game_data, winner_player_num)
-    # test_process_json_data("test-game.json", lambda x: x**5, EvaluationNetConv2)
+    init_utility_gui(5)
+    game_data, winner_player_num = test_simulate_game()
+    test_process_game_data(game_data, winner_player_num)
+    test_process_json_data("test-game.json", lambda x: x**5, EvaluationNetConv2)
 
-    model = torch.load("../AI/checkpoints/conv-net-v2-20x20-temp-02-LR-0005/iteration-1229.pt")
-
-    torch.save(model, "../AI/final-models/iteration-1229-full-model.pt")
 
