@@ -1,7 +1,4 @@
-
-matplotlib==3.7.1
-scikit-learn==1.2.2
 pygame==2.4.0
-torch==2.0.1+cu117
-seaborn==0.12.2
 tensorboard==2.13.0
+torch==2.0.1+cu117
+
