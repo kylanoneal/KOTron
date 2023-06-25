@@ -1,10 +1,6 @@
 import torch
 from torch import nn
-from torch.utils.data import DataLoader
-from torch import optim
 import torch.nn.functional as F
-
-device = "cuda" if torch.cuda.is_available() else "cpu"
 
 class EvaluationNetConv3(nn.Module):
     PADDING = 2

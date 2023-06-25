@@ -1,7 +1,6 @@
 from AI.pytorch_game_utils import *
 from game.KyTron import *
 
-EQUAL_ACTION_PROBS = np.array([0.25, 0.25, 0.25, 0.25])
 
 class Node:
     def __init__(self, state: BMTron, player_num, parent=None):
@@ -22,7 +21,6 @@ class Node:
 
         available_actions = self.state.get_possible_directions(self.player_num)
 
-        # print("I: ", i, "action: ", action)
         for action in available_actions:
             next_game_state = deepcopy(self.state)
             next_game_state.update_direction(self.player_num, action)
@@ -36,6 +34,7 @@ class Node:
 def search(model, game, player_num, head_val, n_iterations, exploration_factor=2):
     model_type = type(model)
     root = Node(game, player_num)
+
     def find_best_leaf(node) -> Node:
         while node.is_expanded and not node.is_terminal:
             _, node = select(node)
@@ -48,7 +47,6 @@ def search(model, game, player_num, head_val, n_iterations, exploration_factor=2
         # print("about to expand children")
         # print("node children length:", len(node.children.items()))
         for action, child in node.children.items():
-            ## POSSIBLE JANK
 
             # IF CHILD UNVISITED ALWAYS VISIT
             # if child.n_visits == 0:
@@ -92,10 +90,8 @@ def search(model, game, player_num, head_val, n_iterations, exploration_factor=2
         for action, n_visits in node.children.items():
             actions.append(action)
             visits.append(n_visits)
-            
 
         return actions, visits
-
 
     for _ in range(n_iterations):
         root.n_visits += 1
@@ -107,4 +103,3 @@ def search(model, game, player_num, head_val, n_iterations, exploration_factor=2
         backpropagate(leaf, eval)
 
     return action_probabilities(root)
-

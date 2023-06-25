@@ -1,12 +1,9 @@
-import matplotlib.pyplot as plt
-from sklearn.metrics import confusion_matrix
-import seaborn as sns
 import numpy as np
 import json
-import MCTS
 from copy import deepcopy
 from typing import Callable, Optional
 
+from AI import MCTS
 from AI.model_architectures import *
 from game.KyTron import *
 

@@ -1,6 +1,6 @@
 import pygame
 import pickle
-from game.Bot import *
+from AI.Bot import *
 from game.KyTron import *
 from copy import deepcopy
 
@@ -18,15 +18,16 @@ class BMTronGUI:
 
     LENGTH = 800
     WIDTH = 800
-    SPEED = 500
+    game_speed = 500
 
-    def __init__(self, game: BMTron, bot: Optional[TronBot]=None, collect_trn_data=False):
+    def __init__(self, game: BMTron, bot: Optional[TronBot]=None, game_speed=500, collect_trn_data=False):
 
         pygame.init()
         self.collect_trn_data = collect_trn_data
         # self.bot = ImitationBot(self.game) if is_bot else None
         self.game = game
         self.bot = bot
+        self.game_speed = game_speed
         self.SCORES = [0, 0, 0, 0]
         self.COLORS = [self.PURPLE, self.BLUE, self.RED, self.WHITE]
         self.screen_factor = self.LENGTH / self.game.dimension
@@ -58,7 +59,6 @@ class BMTronGUI:
             if not self.game.winner_found:
 
                 if self.collect_trn_data:
-                    #print("APPENDING MOVE")
                     kylan_moves.append((deepcopy(self.game.collision_table),
                                         self.game.players[0].head,
                                         self.game.players[0].direction.value))
@@ -75,15 +75,15 @@ class BMTronGUI:
                     self.update_score()
                     self.score_updated = True
 
-            self.clock_tick(self.SPEED) \
-                # MOVE TO BMTRON GAME
+            self.clock_tick(self.game_speed)
 
         if self.collect_trn_data:
             collect_feat(kylan_moves)
 
-    #CHANGE TO USE "GET_WINNER FUNCTION"
     def update_score(self):
-        self.SCORES[self.game.winner_player_num] += 1
+        # Handle tie
+        if self.game.winner_player_num != -1:
+            self.SCORES[self.game.winner_player_num] += 1
 
     def handle_keydown(self, key):
 
@@ -231,7 +231,7 @@ class BMTronGUI:
                     self.screen.fill(self.get_random_color(), pygame.Rect(newx + offsets[i][0], newy + offsets[i][1],
                                                                           animation_sizes[i][0], animation_sizes[i][1]))
 
-            self.clock_tick(self.SPEED)
+            self.clock_tick(self.game_speed)
 
     def get_random_color(self):
         return [random.randrange(0, 256), random.randrange(0, 256), random.randrange(0, 256)]
@@ -252,9 +252,14 @@ class BMTronGUI:
 
 if __name__ == "__main__":
     game = BMTron(2, dimension=20, random_starts=True)
+
+    # Allows us to load any PyTorch model from 'model_architectures.py'
+    import sys
+    sys.path.append('../AI')
+
     bot = ReinforcementBot(game, "../AI/final-models/iteration-1229-full-model.pt")
 
-    game = BMTronGUI(game, bot, collect_trn_data=False)
+    game = BMTronGUI(game, bot, game_speed=80, collect_trn_data=False)
     game.main()
 
 

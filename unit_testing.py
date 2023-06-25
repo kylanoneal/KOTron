@@ -109,12 +109,30 @@ def test_process_json_data(filepath, decay_fn, model_type):
         print_2d_grid(model_input.squeeze(0).tolist())
 
 
+import torch
+
+def check_vram():
+    device = torch.device('cuda') # Assigns the GPU
+    torch.cuda.empty_cache() # Clears the cache to get most accurate reading possible
+
+    # Check the available VRAM in Gigabytes
+    GB = 1024**3 # 1 GB = 1024^3 bytes
+    total_vram = torch.cuda.get_device_properties(device).total_memory / GB
+    print(f'Total VRAM: {total_vram:.2f} GB')
+
+    # Check the available VRAM in Megabytes
+    MB = 1024**2 # 1 MB = 1024^2 bytes
+    total_vram_MB = torch.cuda.get_device_properties(device).total_memory / MB
+    print(f'Total VRAM: {total_vram_MB:.2f} MB')
+
+
 
 
 if __name__ == '__main__':
-    init_utility_gui(5)
-    game_data, winner_player_num = test_simulate_game()
-    test_process_game_data(game_data, winner_player_num)
-    test_process_json_data("test-game.json", lambda x: x**5, EvaluationNetConv2)
+    check_vram()
+# init_utility_gui(5)
+    # game_data, winner_player_num = test_simulate_game()
+    # test_process_game_data(game_data, winner_player_num)
+    # test_process_json_data("test-game.json", lambda x: x**5, EvaluationNetConv2)
 
 

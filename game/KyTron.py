@@ -1,6 +1,7 @@
 import random
 from enum import Enum
 
+
 class Racer:
 
     def __init__(self, head, direction, can_move):
@@ -20,6 +21,25 @@ class Directions(Enum):
     left = 3
 
 
+def get_readable_direction(direction: Directions):
+    assert (isinstance(direction, Directions))
+    if direction == Directions.up:
+        return "UP"
+    if direction == Directions.right:
+        return "RIGHT"
+    if direction == Directions.down:
+        return "DOWN"
+    if direction == Directions.left:
+        return "LEFT"
+
+
+def are_opposite_directions(d1, d2):
+    new_direction = d1.value + 2
+    new_direction = new_direction - 4 if new_direction > 3 else new_direction
+    new_direction = Directions(new_direction)
+    return new_direction == d2
+
+
 class BMTron:
 
     def __init__(self, num_players=2, dimension=40, random_starts=False):
@@ -31,8 +51,6 @@ class BMTron:
         self.build_racers(num_players, self.get_starting_positions(num_players, random_starts))
         self.winner_found = False
         self.winner_player_num = None
-        # self.print_collision_table()
-        # self.print_info()
 
     def get_starting_positions(self, num_players, random_starts):
 
@@ -124,14 +142,8 @@ class BMTron:
 
     def update_direction(self, player_num, direction):
 
-        print("player numero!!!:", player_num)
-        print("type of diredtion:", type(direction))
-        print("that directiON;", direction)
-        print(id(type(direction)))
-        print(id(Directions))
-
-        assert(isinstance(direction, Directions))
-        if not self.are_opposite_directions(self.players[player_num].direction, direction):
+        assert (isinstance(direction, Directions))
+        if not are_opposite_directions(self.players[player_num].direction, direction):
             self.players[player_num].direction = direction
 
     def get_possible_directions(self, player_num):
@@ -144,22 +156,14 @@ class BMTron:
 
         return available_directions
 
-    @staticmethod
-    def are_opposite_directions(d1, d2):
-        new_direction = d1.value + 2
-        new_direction = new_direction - 4 if new_direction > 3 else new_direction
-        new_direction = Directions(new_direction)
-        return new_direction == d2
-
     def check_for_winner(self):
         i = 0
 
         for racer in self.players:
-
             if racer.can_move:
                 i += 1
 
-        # JANK FUNCTION
+
         # More than 1 player can move, game continues
         if i > 1:
             return
@@ -169,17 +173,15 @@ class BMTron:
                 for player_num in range(len(self.players)):
                     if self.players[player_num].can_move:
                         self.winner_player_num = player_num
+            # If 0 players can move, game is a tie
             else:
-                # Tie case
                 self.winner_player_num = -1
 
-    def print_info(self):
-        print(self.players)
+    def print_player_info(self):
         for i in range(len(self.players)):
             print("Player ", i + 1, " :")
             print("Head: ", self.players[i].head)
             print("Direction: ", self.players[i].direction)
-
             print("Player can move?  : ", self.players[i].can_move)
 
     def print_collision_table(self):

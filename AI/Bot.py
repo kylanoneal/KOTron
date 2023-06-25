@@ -71,23 +71,11 @@ class ReinforcementBot(TronBot):
         super().__init__(game)
         self.model = get_model(model_path)
 
-
     def bot_move(self):
-        #JANK ASS PLAYER NUMS
-        action = get_reinforcement_model_next_action(self.model, self.game, 1)
-        print("bout to move XD reinforcement bot!! here:", action)
+        # Use config instead of hard coding head_value
+        # Don't hardcode player num either
+        action = get_next_action(self.model, self.game, 1, head_val=10, temperature=0.0)
         self.game.update_direction(1, action)
-
-class ImitationBot(TronBot):
-
-    def __init__(self, game, model_path):
-        super().__init__(game)
-        self.model = get_model(model_path)
-
-    def bot_move(self):
-        #JANK ASS PLAYER NUMS
-        model_output = get_imitation_model_inference(self.model, self.game, 1)
-        self.game.update_direction(1, Directions(model_output))
 
 class RandomBot(TronBot):
     def __init__(self, game):
@@ -103,24 +91,15 @@ class MiniMaxBot(TronBot):
 
     def bot_move(self):
 
-        direction = get_direction_other_package()
-        print("bout to move XD reinforcement bot!! here:", direction)
-        #direction = self.choose_bot_move(0, BotConfig(look_ahead=1, depth=1, quadrant_all_weight=True))
+        # Change to not hard code player num
+        direction = self.choose_bot_move(0, BotConfig(look_ahead=1, depth=1, quadrant_all_weight=True))
 
         if direction is not None:
             self.game.update_direction(1, direction)
 
-        # direction2 = self.choose_bot_move(0, BotConfig(look_ahead=1, depth = 2, consider_opponent= False))
-        # for bot vs bot
-        # if direction2 is not None:
-        #     self.game.update_direction(1, direction2)
-
-        # god mode
-        # bot_direction = self.game.get_opposite_direction(self.game.players[0][self.game.DIRECTION])
-
     def old_choose_bot_move(self, player_index):
         heads = self.game.get_heads()
-        possible_directions = self.get_possible_directions(self.game, player_index)
+        possible_directions = self.game.get_possible_directions(player_index)
 
         if len(possible_directions) > 0:
             files = self.get_distances(self.game, player_index, possible_directions)
@@ -166,42 +145,6 @@ class MiniMaxBot(TronBot):
     def choose_bot_move(self, player_index, bot_config):
 
         return self.minimax_evaluate(self.game, player_index, bot_config, bot_config.depth)[1]
-
-        # heads = self.game.get_heads()
-        # possible_directions = self.get_possible_directions(heads[player_index])
-        # wwwwwww
-        # if len(possible_directions) == 0:
-        #     return None
-        #
-        # scores = []
-        # for i in range(len(possible_directions)):
-        #
-        #     candidate_state = copy.deepcopy(self.game)
-        #
-        #     candidate_state.update_direction(2, possible_directions[i])
-        #     #print("Old Head: ",candidate_state.get_heads()[player_index])
-        #     candidate_state.move_racers()
-        #     #print("New head: ", candidate_state.get_heads()[1])
-        #     score = self.evaluate(candidate_state)
-        #     #print("Candidate direction: ", self.readable_direction(possible_directions[i]), "\nScore: ", score)
-        #     scores.append(score)
-        #
-        # print("\n")
-        #
-        #
-        # return possible_directions[scores.index(max(scores))]
-
-    def readable_direction(self, direction):
-        if direction == Directions.up:
-            return "UP"
-        if direction == Directions.right:
-            return "RIGHT"
-        if direction == Directions.down:
-            return "DOWN"
-        if direction == Directions.left:
-            return "LEFT"
-
-        return "??????"
 
     def evaluate_position(self, game_state, player_index, bot_config):
         possible_directions = game_state.get_possible_directions(player_index)
@@ -329,9 +272,9 @@ class MiniMaxBot(TronBot):
     def print_scores(self, moves, possible_directions):
         for i in range(len(moves)):
             print("Move: ", possible_directions[i])
-            # print("Density : ", moves[i][0].density, "sub score: ", moves[i][0].density_subscore)
-            # print("Distance subscore: ", moves[i][0].distance_subscore)
-            # print(moves[i][0].grid)
+            print("Density : ", moves[i][0].density, "sub score: ", moves[i][0].density_subscore)
+            print("Distance subscore: ", moves[i][0].distance_subscore)
+            print(moves[i][0].grid)
             print("Path target : ", moves[i][0].self_evaluation.target_square)
             print("Path Subscore: ", moves[i][0].self_evaluation.path_subscore)
 
@@ -348,19 +291,3 @@ class MiniMaxBot(TronBot):
         else:
             return Directions(open_lane)
 
-    # def get_possible_directions(self, game_state, player_index):
-    #
-    #     directions = []
-    #
-    #     for i in range(4):
-    #         head = game_state.players[player_index].head
-    #
-    #         x = head[0] + game_state.DIRECTIONS[i][0]
-    #         y = head[1] + game_state.DIRECTIONS[i][1]
-    #
-    #         if game_state.in_bounds([x, y]):
-    #
-    #             if game_state.collision_table[x][y] == 0:
-    #                 directions.append(Directions(i))
-    #
-    #     return directions

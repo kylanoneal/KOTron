@@ -1,10 +1,11 @@
 import os, re, importlib
 from datetime import datetime
 
+from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 from AI.pytorch_game_utils import *
-from unit_testing.UtilityGUI import show_game_state
+from game.UtilityGUI import show_game_state
 
 
 def game_loop(model, cfg, dataset_save_path):
@@ -88,7 +89,6 @@ def save_dataset(game_dataset, save_dir):
         json.dump(game_dataset, file)
 
 
-
 def train_on_past_simulations(model, trn_loader, trn_optimizer, trn_criterion, epochs=1, logging=False):
     total_trn_loss = 0.0
     total_output_magnitude = 0.0
@@ -151,12 +151,13 @@ def get_dataloader_from_json(json_file, cfg):
                                        cfg["head_val"])
     return DataLoader(processed_data, batch_size=cfg["batch_size"], shuffle=True)
 
+
 def process_sims_and_train_loop(model, cfg, json_files, logging):
     train_iter = 0
     for json_file in json_files:
         train_loader = get_dataloader_from_json(json_file, cfg)
         print("Data loaded from json file:", json_file)
-        
+
         avg_train_loss, avg_out_magnitude = train_on_past_simulations(model, train_loader, optimizer, criterion)
 
         if logging:
@@ -197,12 +198,11 @@ def init_loss_and_optim(cfg, model):
     return cfg["loss_type"](), cfg["optimizer_type"](model.parameters(), cfg["lr"])
 
 
-CONFIG_FILEPATH = "configs/test-config.json"
+CONFIG_FILEPATH = "configs/base-config-10x10.json"
 
 if __name__ == '__main__':
     script_cfg = parse_config(CONFIG_FILEPATH)
     print("Cuda available?", torch.cuda.is_available())
-    # cProfile.run('game_loop()')
 
     checkpoints_dir = "checkpoints/" + script_cfg["model_description"] + "/"
     outer_sims_dir = script_cfg["main_simulation_dir"] + script_cfg["inner_simulation_dir"]
