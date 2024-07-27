@@ -1,5 +1,5 @@
 from collections import defaultdict
-from game.KyTron import*
+from game.ko_tron import KOTron
 
 def reconstruct_path(cameFrom, current):
     total_path = [current]
@@ -79,8 +79,8 @@ def get_neighbors(coordinate, collision_table):
     for i in range(4):
 
 
-        x = coordinate[0] + BMTron.DIRECTIONS[i][0]
-        y = coordinate[1] + BMTron.DIRECTIONS[i][1]
+        x = coordinate[0] + KOTron.DIRECTIONS[i][0]
+        y = coordinate[1] + KOTron.DIRECTIONS[i][1]
 
         if in_bounds([x,y], len(collision_table)):
 
@@ -98,7 +98,7 @@ def main():
 
 
 def wall_test_case():
-    collision_table = BMTron.build_collision_table(50)
+    collision_table = KOTron.build_collision_table(50)
 
     for i in range(50):
         if i != 25:
@@ -110,7 +110,7 @@ def wall_test_case():
     print("path: ", path)
 
 def simple_test_case():
-    path = A_Star((0,0), (25, 25), BMTron.build_collision_table(50))
+    path = A_Star((0,0), (25, 25), KOTron.build_collision_table(50))
     print("path: ", path)
 
 if __name__ == '__main__':

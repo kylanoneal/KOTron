@@ -1,7 +1,8 @@
 import copy
-from AI.AStar import *
-from game.KyTron import *
-from AI.pytorch_game_utils import *
+import random
+from AI.AStar import does_path_exist
+from game.ko_tron import KOTron, Directions
+from AI.pytorch_game_utils import get_model, get_next_action, get_random_next_action
 
 
 class Evaluation:
@@ -58,8 +59,9 @@ class BotConfig:
 
 class TronBot:
     """The only internal state is the game state"""
-    def __init__(self, game: BMTron):
+    def __init__(self, game: KOTron, player_num):
         self.game = game
+        self.player_num = player_num
 
     def bot_move(self) -> Directions:
         """Pick the move to use based on the current game state"""
@@ -67,22 +69,21 @@ class TronBot:
 
 class ReinforcementBot(TronBot):
 
-    def __init__(self, game, model_path):
-        super().__init__(game)
+    def __init__(self, game, player_num, model_path):
+        super().__init__(game, player_num)
         self.model = get_model(model_path)
 
     def bot_move(self):
-        # Use config instead of hard coding head_value
-        # Don't hardcode player num either
-        action = get_next_action(self.model, self.game, 1, head_val=10, temperature=0.0)
-        self.game.update_direction(1, action)
+        action = get_next_action(self.model, self.game, self.player_num, temperature=0.0)
+        self.game.update_direction(self.player_num, action)
 
 class RandomBot(TronBot):
-    def __init__(self, game):
-        super().__init__(game)
+    def __init__(self, game, player_num):
+        super().__init__(game, player_num)
 
     def bot_move(self):
-        self.game.update_direction(1, Directions(random.randrange(0,3)))
+        action = get_random_next_action(self.game, self.player_num)
+        self.game.update_direction(self.player_num, action)
 
 class MiniMaxBot(TronBot):
 
