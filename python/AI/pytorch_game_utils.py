@@ -58,21 +58,21 @@ def get_position_evaluation(
 
 
 def get_relevant_info_from_game_state(game_state):
-    return deepcopy(game_state.collision_table), game_state.get_heads()
+    return deepcopy(game_state.grid), game_state.get_heads()
 
 
 def get_model_input_from_raw_info(
     grid,
     heads,
     player_num,
-    head_val,
     model_type: Optional[type] = None,
+    head_val: Optional[int]=None,
     is_part_of_batch=False,
 ):
     np_grid = np.array(grid)
 
-    # TODO: Probably a better way to do this
-    if model_type.__name__ == "EvaluationNetConv3":
+    # TODO: JaNK
+    if model_type is None or "EvaluationNetConv3" in model_type.__name__:
         # if model_type == EvaluationNetConv3:
         processed_grid = np.zeros((3, np_grid.shape[0], np_grid.shape[1]))
         processed_grid[0, :, :] = np.where(np_grid == 0, 0, 1)
@@ -108,6 +108,8 @@ def get_next_action(
     evaluations = []
     available_actions = game.get_possible_directions(player_num)
 
+    assert not model.training, "Model in training mode"
+
     for action in available_actions:
         next_game_state = deepcopy(game)
         next_game_state.update_direction(player_num, action)
@@ -116,7 +118,7 @@ def get_next_action(
         grid, heads = get_relevant_info_from_game_state(next_game_state)
 
         model_input = get_model_input_from_raw_info(
-            grid, heads, player_num, head_val, model_type=model_type
+            grid, heads, player_num, model_type=model_type, head_val=head_val
         )
 
         curr_eval = model(model_input)
@@ -190,26 +192,39 @@ def process_game_data(game_data, winner_player_num, game_length_threshold=0):
     return processed_game_data
 
 
-def process_json_data(filepath, model_type, decay_fn, tie_is_neutral, head_val):
+def process_json_data(filepath, model_type, decay_fn, tie_is_neutral, head_val=None):
     with open(filepath, "r") as file:
         # Load the JSON data into a Python object
         game_sims = json.load(file)
 
     processed_data = []
-    for binary_grid, heads, p_num, game_progress, won_lost_or_tied in game_sims:
+    for binary_grid, heads, p_num, game_progress, game_result in game_sims:
         target = get_position_evaluation(
-            decay_fn, game_progress, won_lost_or_tied, tie_is_neutral
+            game_progress, GameResult(game_result), decay_fn, tie_is_neutral
         )
 
         model_input = get_model_input_from_raw_info(
             binary_grid,
             heads,
             p_num,
-            head_val,
             model_type=model_type,
+            head_val=head_val,
             is_part_of_batch=True,
         )
 
         processed_data.append((model_input, target))
 
     return processed_data
+
+def get_dataloader(game_collection: GameCollection):
+
+    dataset = []
+
+    for game_container in game_collection.game_containers:
+        for position in game_container.positions:
+
+            model_input = get_model_input_from_raw_info(
+                position, player_num, 
+            )
+
+            label = get_position_evaluation()

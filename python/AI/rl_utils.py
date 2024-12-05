@@ -7,66 +7,71 @@ from pathlib import Path, WindowsPath
 from tqdm import tqdm
 from typing import Union, Sequence, Optional
 
+
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
+from containers.game_containers import GameContainer
 from AI.pytorch_game_utils import device, get_next_action, get_random_next_action, process_game_data, get_relevant_info_from_game_state, process_json_data
 from game.utility_gui import show_game_state
 from game.ko_tron import KOTron
 
 
-def game_loop(model, cfg, game_data_out_file, loop_iter):
-    cumulative_game_lengths = games_tied = games_not_tied = player_zero_wins = 0
-    game_dataset = []
+# def game_loop(model, cfg, game_data_out_file, loop_iter) -> list[GameContainer]:
+#     cumulative_game_lengths = games_tied = games_not_tied = player_zero_wins = 0
+#     game_dataset = []
 
-    for game_iter in range(cfg["max_game_iterations"]):
+#     for game_iter in range(cfg["max_game_iterations"]):
 
-        game_data, winner_player_num = simulate_game(model, cfg)
+#         game_container = simulate_game(model, cfg)
 
-        cumulative_game_lengths += len(game_data)
+#         cumulative_game_lengths += len(game_data)
 
-        if winner_player_num == -1:
-            games_tied += 1
-        else:
-            games_not_tied += 1
-            if winner_player_num == 0:
-                player_zero_wins += 1
+#         if winner_player_num == -1:
+#             games_tied += 1
+#         else:
+#             games_not_tied += 1
+#             if winner_player_num == 0:
+#                 player_zero_wins += 1
 
-        game_dataset.extend(process_game_data(game_data, winner_player_num, cfg["game_length_threshold"]))
+#         game_dataset.extend(process_game_data(game_data, winner_player_num, cfg["game_length_threshold"]))
 
-        if game_iter % 250 == 0:
-            print(f"{game_iter} out of {cfg['max_game_iterations']} games played. Loop iter: {loop_iter}")
+#         if game_iter % 250 == 0:
+#             print(f"{game_iter} out of {cfg['max_game_iterations']} games played. Loop iter: {loop_iter}")
 
-    # Update logs
-    update_game_data_logs(cumulative_game_lengths, games_tied, games_not_tied, player_zero_wins,
-                          cfg["max_game_iterations"], loop_iter)
+#     # Update logs
+#     update_game_data_logs(cumulative_game_lengths, games_tied, games_not_tied, player_zero_wins,
+#                           cfg["max_game_iterations"], loop_iter)
 
-    # Save games to json
-    save_dataset(game_dataset, game_data_out_file)
+#     # Save games to json
+#     save_dataset(game_dataset, game_data_out_file)
 
 
 # Maybe don't use the cfg here, or parse into some local variables to increase speed
-def simulate_game(model, cfg):
+def simulate_game(model, cfg) -> GameContainer:
     game_data = []
 
     game = KOTron(num_players=cfg["num_players"], dimension=cfg["game_dimension"],
                   random_starts=cfg["is_random_starts"])
 
-    random_move_count = 0
+    move_count = 0
     while not game.winner_found:
 
         for player_num in range(cfg["num_players"]):
 
-            if random_move_count < cfg["random_start_moves"]:
-                random_move_count += 1
+            if move_count < cfg["random_start_moves"]:
                 action = get_random_next_action(game, player_num)
             else:
                 action = cfg["action_fn"](model, game, player_num, cfg["head_val"], cfg["temperature"])
             game.update_direction(player_num, action)
 
+
+
         game_data.append(get_relevant_info_from_game_state(game))
         game.move_racers()
         game.check_for_winner()
+
+        move_count += 1
 
         if cfg["show_games"]:
             show_game_state(game)
@@ -135,21 +140,21 @@ def get_weights_sum_of_squares(model):
 
 
 
-def get_dataloader_from_json(json_file, cfg):
-    processed_data = process_json_data(json_file, cfg["model_type"], cfg["decay_fn"], cfg["tie_is_neutral"],
-                                       cfg["head_val"])
-    return DataLoader(processed_data, batch_size=cfg["batch_size"], shuffle=True)
+# def get_dataloader_from_json(json_file, cfg):
+#     processed_data = process_json_data(json_file, cfg["model_type"], cfg["decay_fn"], cfg["tie_is_neutral"],
+#                                        cfg["head_val"])
+#     return DataLoader(processed_data, batch_size=cfg["batch_size"], shuffle=True)
 
 
-def process_sims_and_train_loop(model, cfg, json_file: Path, logging, train_iter):
+# def process_sims_and_train_loop(model, cfg, json_file: Path, logging, train_iter):
 
-    train_loader = get_dataloader_from_json(json_file, cfg)
-    print("Data loaded from json file:", json_file)
+#     train_loader = get_dataloader_from_json(json_file, cfg)
+#     print("Data loaded from json file:", json_file)
 
-    avg_train_loss, avg_out_magnitude = train_on_past_simulations(model, train_loader, optimizer, criterion)
+#     avg_train_loss, avg_out_magnitude = train_on_past_simulations(model, train_loader, optimizer, criterion)
 
-    if logging:
-        update_training_logs(avg_train_loss, avg_out_magnitude, get_weights_sum_of_squares(model), train_iter)
+#     if logging:
+#         update_training_logs(avg_train_loss, avg_out_magnitude, get_weights_sum_of_squares(model), train_iter)
 
 
 def parse_config(cfg_filepath):
@@ -185,46 +190,44 @@ def init_loss_and_optim(cfg, model):
     return cfg["loss_type"](), cfg["optimizer_type"](model.parameters(), cfg["lr"])
 
 
-CONFIG_FILEPATH = "configs/20240725_10x10.config.json"
+CONFIG_FILEPATH = "./AI/configs/0728_train_from_random.config.json"
 
 if __name__ == '__main__':
     script_cfg = parse_config(CONFIG_FILEPATH)
     print("Cuda available?", torch.cuda.is_available())
 
-    checkpoints_folder = Path("./model_checkpoints") / script_cfg["model_description"]
+    checkpoints_folder = Path("./model_checkpoints") / script_cfg["run_uid"]
     checkpoints_folder.mkdir(exist_ok=True, parents=True)
 
-    warnings.warn("DUPLICATE RUN ID")
 
     script_model = init_model(script_cfg)
     criterion, optimizer = init_loss_and_optim(script_cfg, script_model)
 
     if script_cfg["train_only"]:
 
-        game_data_path = Path(script_cfg["game_data_path"])
+        game_data_path = Path(script_cfg["game_data_path"]) 
         assert game_data_path.exists(), f"Game data path doesn't exist: {game_data_path}"
 
-        training_logdir = Path(f"./train_tb/{script_cfg["model_description"]}")
-
+        training_logdir = Path(f"./train_tb/{script_cfg["run_uid"]}")
         writer = SummaryWriter(str(training_logdir))
 
-
         json_files = list(game_data_path.glob('*.json'))
-
 
         for i, json_file in tqdm(enumerate(json_files)):
             process_sims_and_train_loop(script_model, script_cfg, json_file, logging=True, train_iter=i)
 
-            if i % 100 == 0:
-                checkpoint_out_file = checkpoints_folder / f"{script_cfg['model_description']}_{i}.pt"
-                torch.save(script_model, checkpoint_out_file)
+            checkpoint_out_file = checkpoints_folder / f"{script_cfg['run_uid']}_{i}.pt"
+            torch.save(script_model, checkpoint_out_file)
 
     else:
-        game_data_path = Path(script_cfg["game_data_path"]) / script_cfg["model_description"]
-        game_data_path.mkdir(exist_ok=False)
+        game_data_path = Path(script_cfg["game_data_path"]) / script_cfg["run_uid"]
+        tb_folder = Path(f"./tb") / script_cfg['run_uid']
 
-        tb_folder = Path(f"./tb") / script_cfg['model_description']
-        tb_folder.mkdir(exist_ok=False, parents=True)
+        if game_data_path.exists() or tb_folder.exists():
+            warnings.warn("DUPLICATE RUN ID - MIGHT BE OVERWRITING DATA")
+        else:
+            game_data_path.mkdir(exist_ok=False)
+            tb_folder.mkdir(exist_ok=False)
 
         writer = SummaryWriter(str(tb_folder))
 
@@ -233,10 +236,12 @@ if __name__ == '__main__':
 
             game_loop(script_model, script_cfg, game_data_out_file, i)
 
-            process_sims_and_train_loop(script_model, script_cfg, game_data_out_file, logging=True, train_iter=i)
+            if script_cfg['do_training']:
 
-            formatted_datetime = datetime.now().strftime("%m-%d-%H-%M-%S")
-            checkpoint_out_file = checkpoints_folder / str(i)
-            torch.save(script_model, checkpoint_out_file)
+                process_sims_and_train_loop(script_model, script_cfg, game_data_out_file, logging=True, train_iter=i)
 
-            script_cfg["curr_model_iter"] += 1
+                formatted_datetime = datetime.now().strftime("%m-%d-%H-%M-%S")
+                checkpoint_out_file = checkpoints_folder / str(i)
+                torch.save(script_model, checkpoint_out_file)
+
+                script_cfg["curr_model_iter"] += 1

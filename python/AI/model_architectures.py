@@ -2,7 +2,137 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
+class EvaluationNetConv3Dropout2D(nn.Module):
+    PADDING = 2
 
+    def __init__(self, grid_dim=40):
+        # FIX PADDING TO BE IMPLICIT HERE
+        super(EvaluationNetConv3Dropout2D, self).__init__()
+        self.conv1 = nn.Conv2d(3, 10, kernel_size=5, stride=2, padding=0)  # changed stride to 2
+        self.conv2 = nn.Conv2d(10, 20, kernel_size=3, stride=2, padding=1)  # changed stride to 2
+        self.dropout_2d = nn.Dropout2d(p=0.5)
+
+        output_dim1 = self.conv_output_size(grid_dim, 5, 2, 2)  # after first conv layer
+        output_dim2 = self.conv_output_size(output_dim1, 3, 1, 2)  # after second conv layer
+        self.fc1 = nn.Linear(20 * output_dim2 ** 2, 250)  # input features for fc1
+        self.fc_value = nn.Linear(250, 1)
+
+    @staticmethod
+    def conv_output_size(input_size, kernel_size, padding, stride):
+        return ((input_size - kernel_size + 2 * padding) // stride) + 1
+
+    def forward(self, x):
+        padded_game_grid = F.pad(x[:, 0:1], pad=(PADDING, PADDING, PADDING, PADDING), mode='constant', value=1)
+        padded_heads = F.pad(x[:, 1:], pad=(PADDING, PADDING, PADDING, PADDING), mode='constant', value=0)
+        concat = torch.concat((padded_game_grid, padded_heads), axis=1)
+
+        x = F.relu(self.conv1(concat))
+        x = F.relu(self.conv2(x))
+
+        x = self.dropout_2d(x)
+
+        x = torch.flatten(x, 1)  # flatten the tensor
+
+        x = F.relu(self.fc1(x))
+        value_estimate = self.fc_value(x).squeeze(1)
+        return value_estimate
+
+# Just one dense layer
+class EvaluationNetConv3OneFC(nn.Module):
+    PADDING = 2
+
+    def __init__(self, grid_dim=40):
+        # FIX PADDING TO BE IMPLICIT HERE
+        super(EvaluationNetConv3OneFC, self).__init__()
+        self.conv1 = nn.Conv2d(3, 10, kernel_size=5, stride=2, padding=0)  # changed stride to 2
+        self.conv2 = nn.Conv2d(10, 20, kernel_size=3, stride=2, padding=1)  # changed stride to 2
+        output_dim1 = self.conv_output_size(grid_dim, 5, 2, 2)  # after first conv layer
+        output_dim2 = self.conv_output_size(output_dim1, 3, 1, 2)  # after second conv layer
+        self.fc_value = nn.Linear(20 * output_dim2 ** 2, 1)
+
+    @staticmethod
+    def conv_output_size(input_size, kernel_size, padding, stride):
+        return ((input_size - kernel_size + 2 * padding) // stride) + 1
+
+    def forward(self, x):
+        padded_game_grid = F.pad(x[:, 0:1], pad=(PADDING, PADDING, PADDING, PADDING), mode='constant', value=1)
+        padded_heads = F.pad(x[:, 1:], pad=(PADDING, PADDING, PADDING, PADDING), mode='constant', value=0)
+        concat = torch.concat((padded_game_grid, padded_heads), axis=1)
+
+        x = F.relu(self.conv1(concat))
+        x = F.relu(self.conv2(x))
+        x = torch.flatten(x, 1)  # flatten the tensor
+
+        value_estimate = self.fc_value(x).squeeze(1)
+        return value_estimate
+# Stride == 1
+class EvaluationNetConv3OneStride(nn.Module):
+    PADDING = 2
+
+    def __init__(self, grid_dim=40):
+        # FIX PADDING TO BE IMPLICIT HERE
+        super(EvaluationNetConv3OneStride, self).__init__()
+        self.conv1 = nn.Conv2d(3, 10, kernel_size=5, stride=1, padding=0)  # changed stride to 2
+        self.conv2 = nn.Conv2d(10, 20, kernel_size=3, stride=1, padding=1)  # changed stride to 2
+        output_dim1 = self.conv_output_size(grid_dim, 5, 2, 1)  # after first conv layer
+        output_dim2 = self.conv_output_size(output_dim1, 3, 1, 1)  # after second conv layer
+        self.fc1 = nn.Linear(20 * output_dim2 ** 2, 250)  # input features for fc1
+        self.fc_value = nn.Linear(250, 1)
+
+    @staticmethod
+    def conv_output_size(input_size, kernel_size, padding, stride):
+        return ((input_size - kernel_size + 2 * padding) // stride) + 1
+
+    def forward(self, x):
+        padded_game_grid = F.pad(x[:, 0:1], pad=(2, 2, 2, 2), mode='constant', value=1.0)
+        padded_heads = F.pad(x[:, 1:], pad=(2, 2, 2, 2), mode='constant', value=0.0)
+        concat = torch.concat((padded_game_grid, padded_heads), dim=1)
+
+        x = F.relu(self.conv1(concat))
+        x = F.relu(self.conv2(x))
+        x = torch.flatten(x, 1)  # flatten the tensor
+
+        x = F.relu(self.fc1(x))
+        value_estimate = self.fc_value(x).squeeze(1)
+        return value_estimate
+
+
+# Dropout layer after first fc layer
+class EvaluationNetConv3DropoutFC(nn.Module):
+    PADDING = 2
+
+    def __init__(self, grid_dim=40):
+        # FIX PADDING TO BE IMPLICIT HERE
+        super(EvaluationNetConv3DropoutFC, self).__init__()
+        self.conv1 = nn.Conv2d(3, 10, kernel_size=5, stride=2, padding=0)  # changed stride to 2
+        self.conv2 = nn.Conv2d(10, 20, kernel_size=3, stride=2, padding=1)  # changed stride to 2
+        output_dim1 = self.conv_output_size(grid_dim, 5, 2, 2)  # after first conv layer
+        output_dim2 = self.conv_output_size(output_dim1, 3, 1, 2)  # after second conv layer
+        self.fc1 = nn.Linear(20 * output_dim2 ** 2, 250)  # input features for fc1
+        self.fc_value = nn.Linear(250, 1)
+        self.dropout = nn.Dropout(p=0.5)
+
+    @staticmethod
+    def conv_output_size(input_size, kernel_size, padding, stride):
+        return ((input_size - kernel_size + 2 * padding) // stride) + 1
+
+    def forward(self, x):
+        padded_game_grid = F.pad(x[:, 0:1], pad=(PADDING, PADDING, PADDING, PADDING), mode='constant', value=1)
+        padded_heads = F.pad(x[:, 1:], pad=(PADDING, PADDING, PADDING, PADDING), mode='constant', value=0)
+        concat = torch.concat((padded_game_grid, padded_heads), axis=1)
+
+        x = F.relu(self.conv1(concat))
+        x = F.relu(self.conv2(x))
+        x = torch.flatten(x, 1)  # flatten the tensor
+
+        x = F.relu(self.fc1(x))
+        x = self.dropout(x)
+
+        value_estimate = self.fc_value(x).squeeze(1)
+        return value_estimate
+
+
+# BASE
 class EvaluationNetConv3(nn.Module):
     PADDING = 2
 
@@ -21,8 +151,8 @@ class EvaluationNetConv3(nn.Module):
         return ((input_size - kernel_size + 2 * padding) // stride) + 1
 
     def forward(self, x):
-        padded_game_grid = F.pad(x[:, 0:1], pad=(self.PADDING, self.PADDING, self.PADDING, self.PADDING), mode='constant', value=1)
-        padded_heads = F.pad(x[:, 1:], pad=(self.PADDING, self.PADDING, self.PADDING, self.PADDING), mode='constant', value=0)
+        padded_game_grid = F.pad(x[:, 0:1], pad=(PADDING, PADDING, PADDING, PADDING), mode='constant', value=1)
+        padded_heads = F.pad(x[:, 1:], pad=(PADDING, PADDING, PADDING, PADDING), mode='constant', value=0)
         concat = torch.concat((padded_game_grid, padded_heads), axis=1)
 
         x = F.relu(self.conv1(concat))
@@ -52,7 +182,7 @@ class EvaluationNetConv3(nn.Module):
 #         return ((input_size - kernel_size + 2 * padding) // stride) + 1
 #
 #     def forward(self, x):
-#         x = F.pad(x, pad=(self.PADDING, self.PADDING, self.PADDING, self.PADDING), mode='constant', value=1)
+#         x = F.pad(x, pad=(PADDING, PADDING, PADDING, PADDING), mode='constant', value=1)
 #         x = F.relu(self.conv1(x))
 #         x = F.relu(self.conv2(x))
 #         x = x.view(x.size(0), -1)  # flatten the tensor
@@ -79,7 +209,7 @@ class EvaluationNetConv2(nn.Module):
         return ((input_size - kernel_size + 2 * padding) // stride) + 1
 
     def forward(self, x):
-        x = F.pad(x, pad=(self.PADDING, self.PADDING, self.PADDING, self.PADDING), mode='constant', value=1)
+        x = F.pad(x, pad=(PADDING, PADDING, PADDING, PADDING), mode='constant', value=1)
         x = F.relu(self.conv1(x))
         x = F.relu(self.conv2(x))
         x = x.view(x.size(0), -1)  # flatten the tensor
@@ -106,7 +236,7 @@ class EvaluationNetConv1(nn.Module):
         return ((input_size - kernel_size + 2 * padding) // stride) + 1
 
     def forward(self, x):
-        x = F.pad(x, pad=(self.PADDING, self.PADDING, self.PADDING, self.PADDING), mode='constant', value=1)
+        x = F.pad(x, pad=(PADDING, PADDING, PADDING, PADDING), mode='constant', value=1)
         x = F.relu(self.conv1(x))
         x = F.relu(self.conv2(x))
         x = x.view(x.size(0), -1)  # flatten the tensor
@@ -142,7 +272,7 @@ def get_attn_mask(shape, heads, sigma=10.0):
 class AttentionModule(nn.Module):
     def __init__(self, in_channels, out_channels, padding=2):
         super(AttentionModule, self).__init__()
-        self.padding = padding
+        PADDING = padding
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=5, stride=2)
 
     def forward(self, x, player_positions):

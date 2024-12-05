@@ -1,5 +1,6 @@
 import random
 from enum import Enum
+import json
 
 
 class Racer:
@@ -11,18 +12,17 @@ class Racer:
         self.can_move = can_move
 
 
-DIRECTIONS = [[0, -1], [1, 0], [0, 1], [-1, 0]]
-
 
 class Directions(Enum):
-    up = 0
-    right = 1
-    down = 2
-    left = 3
+    """(row, col) from top left"""
+    up = (-1, 0)     
+    right = (0, 1)   
+    down = (1, 0)    
+    left = (0, -1)   
 
 
 def get_readable_direction(direction: Directions):
-    assert (isinstance(direction, Directions))
+    assert isinstance(direction, Directions)
     if direction == Directions.up:
         return "UP"
     if direction == Directions.right:
@@ -50,8 +50,6 @@ class KOTron:
 
         self.new_game_state()
 
-
-
     def get_starting_positions(self, num_players, random_starts):
 
         starts = []
@@ -59,16 +57,19 @@ class KOTron:
         if random_starts:
             i = 0
             while i < num_players:
-                random_start = (random.randrange(1, self.dimension - 1), random.randrange(1, self.dimension-1))
+                random_start = (
+                    random.randrange(1, self.dimension - 1),
+                    random.randrange(1, self.dimension - 1),
+                )
                 if random_start not in starts:
                     starts.append(random_start)
                     i += 1
         else:
 
-            half_dim = int(self.dimension * .5)
+            half_dim = int(self.dimension * 0.5)
             if num_players == 2:
-                starts.append((int(self.dimension * .25), half_dim))
-                starts.append((int(self.dimension * .75), half_dim))
+                starts.append((int(self.dimension * 0.25), half_dim))
+                starts.append((int(self.dimension * 0.75), half_dim))
 
         return starts
 
@@ -81,7 +82,7 @@ class KOTron:
             else:
                 self.players.append(Racer(starts[i], Directions.left, True))
 
-            self.collision_table[starts[i][0]][starts[i][1]] = i + 1
+            self.grid[starts[i][0]][starts[i][1]] = i + 1
 
     def get_heads(self):
 
@@ -97,17 +98,17 @@ class KOTron:
         return directions
 
     @staticmethod
-    def build_collision_table(dimension):
+    def build_grid(dimension):
 
-        collision_table = []
+        grid = []
 
         for i in range(dimension):
-            collision_table.append([])
+            grid.append([])
 
             for j in range(dimension):
-                collision_table[i].append(0)
+                grid[i].append(0)
 
-        return collision_table
+        return grid
 
     def get_next_square(self, racer):
         dx, dy = DIRECTIONS[racer.direction.value]
@@ -128,21 +129,21 @@ class KOTron:
         for player_num, racer in enumerate(self.players):
             if racer.can_move:
                 head_x, head_y = racer.head
-                if self.collision_table[head_x][head_y] != 0:
+                if self.grid[head_x][head_y] != 0:
                     racer.can_move = False
-                    self.players[self.collision_table[head_x][head_y] - 1].can_move = False
+                    self.players[self.grid[head_x][head_y] - 1].can_move = False
 
-                self.collision_table[head_x][head_y] = player_num + 1
+                self.grid[head_x][head_y] = player_num + 1
 
     def in_bounds(self, x, y):
         return 0 <= x < self.dimension and 0 <= y < self.dimension
 
     def is_in_bounds_and_empty(self, x, y):
-        return self.in_bounds(x, y) and self.collision_table[x][y] == 0
+        return self.in_bounds(x, y) and self.grid[x][y] == 0
 
     def update_direction(self, player_num, direction):
 
-        assert (isinstance(direction, Directions))
+        assert isinstance(direction, Directions)
         if not are_opposite_directions(self.players[player_num].direction, direction):
             self.players[player_num].direction = direction
 
@@ -163,7 +164,6 @@ class KOTron:
             if racer.can_move:
                 i += 1
 
-
         # More than 1 player can move, game continues
         if i > 1:
             return
@@ -179,20 +179,50 @@ class KOTron:
 
     def new_game_state(self):
 
-        self.collision_table = KOTron.build_collision_table(self.dimension)
+        self.grid = KOTron.build_grid(self.dimension)
         self.players = []
-        self.build_racers(self.num_players, self.get_starting_positions(self.num_players, self.random_starts))
+        self.build_racers(
+            self.num_players,
+            self.get_starting_positions(self.num_players, self.random_starts),
+        )
         self.winner_found = False
         self.winner_player_num = None
 
+    """
+    Get a JSON string representation of the current game state
+    """
 
-    def print_player_info(self):
-        for i in range(len(self.players)):
-            print("Player ", i + 1, " :")
-            print("Head: ", self.players[i].head)
-            print("Direction: ", self.players[i].direction)
-            print("Player can move?  : ", self.players[i].can_move)
+    def to_json(self) -> str:
 
-    def print_collision_table(self):
-        for i in range(self.dimension):
-            print(self.collision_table[i])
+        player_list = []
+
+        for i, player in enumerate(self.players):
+            player_list.append(
+                {
+                    "player_num": i + 1,
+                    "direction": player.direction.value,
+                    "head_pos": player.head,
+                }
+            )
+
+        json_dict = {
+            "grid": self.grid,
+            "players": player_list
+        }
+
+        return json.dumps(json_dict)
+
+    def __repr__(self):
+        repr_str = ""
+        for y in range(self.dimension):
+            for x in range(self.dimension):
+                repr_str += f"{self.grid[x][y]} "
+            repr_str += "\n"
+
+        repr_str += (
+            f"\n{'Player Num':<15}{'Head (x, y)':<15}{'Direction':<15}{'Can Move':<15}"
+        )
+        for i, player in enumerate(self.players):
+            repr_str += f"\n{i:<15}{str(player.head):<15}{player.direction.name:<15}{str(player.can_move):<15}"
+
+        return repr_str

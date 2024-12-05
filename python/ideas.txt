@@ -1,0 +1,21 @@
+A really fucking shit bot will give you good data on what is bad - but not good data on what is good. use this how you will
+
+Eval Ideas:
+
+-Put bot in really shit position and make sure eval is really shit
+-Setup levels and see if the bot can make the correct decisions to win
+
+
+Should I make player numbers 1-indexed????????
+
+Make game sims have as little steps as possible- like isntead of move_racers(), then check for winners, just have a game_step() or some shit
+
+-Parallelize the evaluation of multiple positions
+    - Instead of inputting [1 position, 3, 10, 10] to model
+    - Do [x positions, 3, 10, 10]
+
+-Concurrency (multithreading) when running simulations?
+
+-Is there any possibilty on NaNs coming out of my model?
+
+-Use tch crate? onnxruntime crate (how is this differetn than ort)?

@@ -1,0 +1,23 @@
+[package]
+name = "tron_rust"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ort = {version = "=2.0.0-rc.9", features = [ "cuda" ]}
+ndarray="0.16"
+strum = "0.24"
+strum_macros = "0.24"
+rand = "0.8"
+im = "15.0"
+
+tch = {version="0.18.1", path="../../tch-rs"}
+
+winapi = {version = "0.3.9", features = ["libloaderapi"]}
+anyhow = "1.0.94"
+
+[dev-dependencies]
+torch-sys = {version="0.18.1", path="../../tch-rs/torch-sys"}
+
+[profile.release]
+debug = true

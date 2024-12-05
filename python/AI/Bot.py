@@ -72,6 +72,7 @@ class ReinforcementBot(TronBot):
     def __init__(self, game, player_num, model_path):
         super().__init__(game, player_num)
         self.model = get_model(model_path)
+        self.model.eval()
 
     def bot_move(self):
         action = get_next_action(self.model, self.game, self.player_num, temperature=0.0)

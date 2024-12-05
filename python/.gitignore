@@ -26,3 +26,5 @@ venv.bak/
 .idea/
 
 ./AI/model_checkpoints/
+
+# Rust stuff
