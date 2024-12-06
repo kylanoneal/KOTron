@@ -87,7 +87,7 @@ impl GameState {
     
         // let mut new_players: Vector<Player> = vector![new_p1, new_p2];
 
-
+        // Just clone the whole game state instead of clone players and grid individually?
 
         // Does this work?
         let mut new_players = game.players.clone();
@@ -137,6 +137,7 @@ impl GameState {
         }
 
         // Add new walls to self.grid
+        // You can add this to the previous loop if ya want
         for player in new_players.iter() {
             let new_grid_row = new_grid[player.row].update(player.col, true);
             new_grid = new_grid.update(player.row, new_grid_row);

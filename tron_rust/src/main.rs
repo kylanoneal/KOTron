@@ -13,15 +13,17 @@ use ort::{
 };
 
 use im::{vector, Vector};
-use tch::{nn, CModule, Cuda, Device, IndexOp, Kind, Tensor};
+// use tch::{nn, CModule, Cuda, Device, IndexOp, Kind, Tensor};
 
 mod models;
 mod tron;
 
-use models::{Model, OrtModel, TorchScriptModel};
+use models::{Model, OrtModel}; //TorchScriptModel};
 use tron::{Direction, DirectionUpdate, GameState, GameStatus, Player};
 
 use anyhow::{ensure, Result};
+
+use rayon::prelude::*;
 
 
     // Hack to make CUDA work
@@ -35,25 +37,27 @@ use anyhow::{ensure, Result};
     // println!("cudnn: {}", tch::Cuda::cudnn_is_available());
     // assert!(Cuda::is_available());
 
-fn debug_ort() -> Result<Vec<f32>>
-{
-    let model = Session::builder()?.commit_from_file("tron_model_dynamic.onnx")?;
 
-    let mut input: Array4<f32> = Array::zeros((2, 3, 10, 10));
 
-    let outputs = model.run(ort::inputs![input]?)?;
 
-    let predictions = outputs[0].try_extract_tensor::<f32>()?;
-
-    let predictions_array = predictions.to_owned(); // This creates an ArrayD<f32>
-    let (predictions_vec, _) = predictions_array.into_raw_vec_and_offset();
-
-    println!("{:?}", predictions_vec);
-
-    Ok(predictions_vec)
-}
 
 fn main() {
+
+
+    println!("INNER START");
+    let start = Instant::now();
+
+    
+    let num_threads = 4;
+    (0..num_threads)
+        .into_par_iter() // Parallel iterator
+        .for_each(|_| run_sims()); // Call simulate() for each iteration
+
+    let duration = start.elapsed();
+    println!("OUTER DURATION: {:?}", duration);
+
+}
+fn run_sims() {
 
     
     // let result = debug_ort();
@@ -93,7 +97,7 @@ fn main() {
     let ort_model: OrtModel = OrtModel::new("tron_model_dynamic.onnx").expect("Failed to load model");
 
     println!("starting sims");
-    let n_games = 1000;
+    let n_games = 10000 * 2;
     let start = Instant::now();
 
     let mut p1_wins = 0;
@@ -231,6 +235,8 @@ fn argmax(vec: &Vec<f32>) -> usize {
     max_index
 }
 
+
+// Move this into game and change signature to fn get_possible_moves(game, player_index)
 fn get_possible_moves(row: usize, col: usize, grid: &Vector<Vector<bool>>) -> Vec<Direction> {
     let curr_row = row as i8;
     let curr_col = col as i8;

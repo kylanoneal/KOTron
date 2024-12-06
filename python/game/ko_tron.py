@@ -1,228 +1,225 @@
 import random
 from enum import Enum
-import json
+from copy import deepcopy
+from dataclasses import dataclass
 
 
-class Racer:
+import numpy as np
 
-    def __init__(self, head, direction, can_move):
-        self.head = head
-        assert isinstance(direction, Directions)
+
+class Direction(Enum):
+    """(row, col) from top left"""
+
+    UP = (-1, 0)
+    DOWN = (1, 0)
+    LEFT = (0, -1)
+    RIGHT = (0, 1)
+
+    @staticmethod
+    def are_opposite_directions(d1: "Direction", d2: "Direction") -> bool:
+        dr1, dc1 = d1.value
+        dr2, dc2 = d2.value
+        return (dr1 + dr2 == 0) and (dc1 + dc2 == 0)
+
+    @staticmethod
+    def get_random_direction() -> "Direction":
+        return random.choice(list(Direction))
+
+
+class Player:
+
+    def __init__(self, row: int, col: int, direction: Direction, can_move: bool):
+        self.row = row
+        self.col = col
         self.direction = direction
         self.can_move = can_move
 
 
+class GameStatus(Enum):
 
-class Directions(Enum):
-    """(row, col) from top left"""
-    up = (-1, 0)     
-    right = (0, 1)   
-    down = (1, 0)    
-    left = (0, -1)   
-
-
-def get_readable_direction(direction: Directions):
-    assert isinstance(direction, Directions)
-    if direction == Directions.up:
-        return "UP"
-    if direction == Directions.right:
-        return "RIGHT"
-    if direction == Directions.down:
-        return "DOWN"
-    if direction == Directions.left:
-        return "LEFT"
+    IN_PROGRESS = -1
+    TIE = 0
+    P1_WIN = 1
+    P2_WIN = 2
+    P3_WIN = 3
+    P4_WIN = 4
 
 
-def are_opposite_directions(d1, d2):
-    new_direction = d1.value + 2
-    new_direction = new_direction - 4 if new_direction > 3 else new_direction
-    new_direction = Directions(new_direction)
-    return new_direction == d2
+@dataclass
+class DirectionUpdate:
+    direction: Direction
+    player_index: int
+
+
+@dataclass
+class DefaultStart:
+    row_fraction: float
+    col_fraction: float
+    direction: Direction
 
 
 class KOTron:
 
-    def __init__(self, num_players=2, dimension=40, random_starts=False):
+    TWO_PLAYER_DEFAULT_STARTS = [
+        DefaultStart(row_fraction=0.5, col_fraction=0.25, direction=Direction.RIGHT),
+        DefaultStart(row_fraction=0.5, col_fraction=0.25, direction=Direction.RIGHT),
+    ]
+    # TODO:
+    # THREE_PLAYER_DEFAULT_STARTS = [...]
+    # FOUR_PLAYER_DEFAULT_STARTS = [...]
 
-        self.num_players = 2
-        self.dimension = dimension
-        self.random_starts = random_starts
+    def __init__(self, num_players=2, num_rows=10, num_cols=10, random_starts=False):
+        """
+        Init game without pre-initialized players.
+        """
 
-        self.new_game_state()
+        self.grid = np.zeros((num_rows, num_cols), dtype=bool)
+        self.status = GameStatus.IN_PROGRESS
+        self.players = []
 
-    def get_starting_positions(self, num_players, random_starts):
-
-        starts = []
-
+        starts = set()
         if random_starts:
             i = 0
             while i < num_players:
                 random_start = (
-                    random.randrange(1, self.dimension - 1),
-                    random.randrange(1, self.dimension - 1),
+                    random.randrange(1, num_rows - 1),
+                    random.randrange(1, num_cols - 1),
                 )
                 if random_start not in starts:
-                    starts.append(random_start)
+                    starts.add(random_start)
+                    self.players.append(
+                        Player(
+                            random_start[0],
+                            random_start[1],
+                            direction=Direction.get_random_direction(),
+                            can_move=True,
+                        )
+                    )
                     i += 1
         else:
 
-            half_dim = int(self.dimension * 0.5)
             if num_players == 2:
-                starts.append((int(self.dimension * 0.25), half_dim))
-                starts.append((int(self.dimension * 0.75), half_dim))
-
-        return starts
-
-    def build_racers(self, num_players, starts):
-
-        for i in range(num_players):
-
-            if i % 2 == 0:
-                self.players.append(Racer(starts[i], Directions.right, True))
+                default_starts = KOTron.TWO_PLAYER_DEFAULT_STARTS
             else:
-                self.players.append(Racer(starts[i], Directions.left, True))
+                raise NotImplementedError()
 
-            self.grid[starts[i][0]][starts[i][1]] = i + 1
+            for i in range(num_players):
 
-    def get_heads(self):
+                self.players.append(
+                    Player(
+                        row=int(default_starts[i][0] * num_rows),
+                        col=int(default_starts[i][1] * num_cols),
+                        direction=Direction.up,
+                        can_move=True,
+                    )
+                )
 
-        return [player.head for player in self.players]
-
-    def get_directions(self):
-
-        directions = []
-
-        for racer in self.players:
-            directions.append(DIRECTIONS[racer.direction.value])
-
-        return directions
 
     @staticmethod
-    def build_grid(dimension):
+    def next(game: "KOTron", direction_updates: list[DirectionUpdate]) -> "KOTron":
 
-        grid = []
+        next_game_state = deepcopy(game)
 
-        for i in range(dimension):
-            grid.append([])
+        for dir_update in direction_updates:
+            next_game_state.players[dir_update.player_index].direction = dir_update.direction
 
-            for j in range(dimension):
-                grid[i].append(0)
-
-        return grid
-
-    def get_next_square(self, racer):
-        dx, dy = DIRECTIONS[racer.direction.value]
-        return racer.head[0] + dx, racer.head[1] + dy
-
-    def move_racers(self):
-
-        for player_num, racer in enumerate(self.players):
-            if racer.can_move:
-                new_x, new_y = self.get_next_square(racer)
-                has_collided = not self.is_in_bounds_and_empty(new_x, new_y)
-
-                if has_collided:
-                    racer.can_move = False
+        for player in next_game_state.players:
+            if player.can_move:
+                dr, dc = player.direction.value
+                new_row, new_col = player.row + dr, player.col + dc
+                if (
+                    KOTron.in_bounds(next_game_state.grid, new_row, new_col)
+                    and not next_game_state.grid[new_row, new_col]
+                ):
+                    player.row = new_row
+                    player.col = new_col
                 else:
-                    racer.head = (new_x, new_y)
+                    player.can_move = False
 
-        for player_num, racer in enumerate(self.players):
-            if racer.can_move:
-                head_x, head_y = racer.head
-                if self.grid[head_x][head_y] != 0:
-                    racer.can_move = False
-                    self.players[self.grid[head_x][head_y] - 1].can_move = False
 
-                self.grid[head_x][head_y] = player_num + 1
+        # Case where players attempt to occupy same square
+        for i in range(len(next_game_state.players)):
 
-    def in_bounds(self, x, y):
-        return 0 <= x < self.dimension and 0 <= y < self.dimension
+            pi = next_game_state.players[i]
 
-    def is_in_bounds_and_empty(self, x, y):
-        return self.in_bounds(x, y) and self.grid[x][y] == 0
+            if pi.can_move:
+                for j in range(i + 1, len(next_game_state.players)):
+                    pj = next_game_state.players[j]
 
-    def update_direction(self, player_num, direction):
+                    if pj.can_move:
+                        if pi.row == pj.row and pi.col == pj.col:
+                            pi.can_move = False
+                            pj.can_move = False
 
-        assert isinstance(direction, Directions)
-        if not are_opposite_directions(self.players[player_num].direction, direction):
-            self.players[player_num].direction = direction
+            next_game_state.grid[pi.row, pi.col] = True
 
-    def get_possible_directions(self, player_num):
+        next_game_state.status = KOTron.get_status(next_game_state.players)
+
+        return next_game_state
+
+    @staticmethod
+    def in_bounds(grid: np.ndarray, row: int, col: int):
+        return 0 <= row < grid.shape[0] and 0 <= col < grid.shape[1]
+    
+    @staticmethod
+    def get_status(players: list[Player]):
+
+        num_players_can_move = 0
+
+        for player in players:
+            if player.can_move:
+                num_players_can_move += 1
+
+        if num_players_can_move > 1:
+            return GameStatus.IN_PROGRESS
+        elif num_players_can_move == 0:
+            return GameStatus.TIE
+
+        elif num_players_can_move == 1:
+            # Assuming 2 players only
+            if players[0].can_move:
+                return GameStatus.P1_WIN
+            elif players[1].can_move:
+                return GameStatus.P2_WIN
+            else:
+                raise NotImplementedError()
+
+
+    @staticmethod
+    def get_possible_directions(game: 'KOTron', player_index):
         available_directions = []
-        head_x, head_y = self.players[player_num].head
-        for i, (dx, dy) in enumerate(DIRECTIONS):
-            new_x, new_y = head_x + dx, head_y + dy
-            if self.is_in_bounds_and_empty(new_x, new_y):
-                available_directions.append(Directions(i))
+        player = game.players[player_index]
+
+        for dir in Direction:
+
+            dr, dc = dir.value
+            new_row, new_col = player.row + dr, player.col + dc
+
+            if KOTron.in_bounds(game.grid, new_row, new_col) and not game.grid[new_row, new_col]:
+                available_directions.append(dir)
 
         return available_directions
 
-    def check_for_winner(self):
-        i = 0
 
-        for racer in self.players:
-            if racer.can_move:
-                i += 1
+    # TODO: Where should this live?
+    # """
+    # Get a JSON string representation of the current game state
+    # """
 
-        # More than 1 player can move, game continues
-        if i > 1:
-            return
-        else:
-            self.winner_found = True
-            if i == 1:
-                for player_num in range(len(self.players)):
-                    if self.players[player_num].can_move:
-                        self.winner_player_num = player_num
-            # If 0 players can move, game is a tie
-            else:
-                self.winner_player_num = -1
+    # def to_json(self) -> str:
 
-    def new_game_state(self):
+    #     player_list = []
 
-        self.grid = KOTron.build_grid(self.dimension)
-        self.players = []
-        self.build_racers(
-            self.num_players,
-            self.get_starting_positions(self.num_players, self.random_starts),
-        )
-        self.winner_found = False
-        self.winner_player_num = None
+    #     for i, player in enumerate(self.players):
+    #         player_list.append(
+    #             {
+    #                 "player_num": i + 1,
+    #                 "direction": player.direction.value,
+    #                 "head_pos": player.head,
+    #             }
+    #         )
 
-    """
-    Get a JSON string representation of the current game state
-    """
+    #     json_dict = {"grid": self.grid, "players": player_list}
 
-    def to_json(self) -> str:
+    #     return json.dumps(json_dict)
 
-        player_list = []
-
-        for i, player in enumerate(self.players):
-            player_list.append(
-                {
-                    "player_num": i + 1,
-                    "direction": player.direction.value,
-                    "head_pos": player.head,
-                }
-            )
-
-        json_dict = {
-            "grid": self.grid,
-            "players": player_list
-        }
-
-        return json.dumps(json_dict)
-
-    def __repr__(self):
-        repr_str = ""
-        for y in range(self.dimension):
-            for x in range(self.dimension):
-                repr_str += f"{self.grid[x][y]} "
-            repr_str += "\n"
-
-        repr_str += (
-            f"\n{'Player Num':<15}{'Head (x, y)':<15}{'Direction':<15}{'Can Move':<15}"
-        )
-        for i, player in enumerate(self.players):
-            repr_str += f"\n{i:<15}{str(player.head):<15}{player.direction.name:<15}{str(player.can_move):<15}"
-
-        return repr_str

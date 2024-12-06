@@ -11,13 +11,14 @@ strum_macros = "0.24"
 rand = "0.8"
 im = "15.0"
 
-tch = {version="0.18.1", path="../../tch-rs"}
+# tch = {version="0.18.1", path="../../tch-rs"}
 
 winapi = {version = "0.3.9", features = ["libloaderapi"]}
 anyhow = "1.0.94"
+rayon = "1.10.0"
 
-[dev-dependencies]
-torch-sys = {version="0.18.1", path="../../tch-rs/torch-sys"}
+# [dev-dependencies]
+# torch-sys = {version="0.18.1", path="../../tch-rs/torch-sys"}
 
 [profile.release]
 debug = true
