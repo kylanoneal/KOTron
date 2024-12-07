@@ -1,5 +1,5 @@
 import random
-from enum import Enum
+from enum import Enum, StrEnum, auto
 from copy import deepcopy
 from dataclasses import dataclass
 
@@ -37,12 +37,21 @@ class Player:
 
 class GameStatus(Enum):
 
-    IN_PROGRESS = -1
-    TIE = 0
-    P1_WIN = 1
-    P2_WIN = 2
-    P3_WIN = 3
-    P4_WIN = 4
+    IN_PROGRESS = auto()
+    TIE = auto()
+    P1_WIN = auto()
+    P2_WIN = auto()
+    P3_WIN = auto()
+    P4_WIN = auto()
+
+    @staticmethod
+    def index_of_winner(status: 'GameStatus'):
+        if status == GameStatus.P1_WIN:
+            return 0
+        if status == GameStatus.P2_WIN:
+            return 1
+        else:
+            raise NotImplementedError()
 
 
 @dataclass
@@ -117,6 +126,8 @@ class KOTron:
 
     @staticmethod
     def next(game: "KOTron", direction_updates: list[DirectionUpdate]) -> "KOTron":
+
+        assert game.status == GameStatus.IN_PROGRESS
 
         next_game_state = deepcopy(game)
 

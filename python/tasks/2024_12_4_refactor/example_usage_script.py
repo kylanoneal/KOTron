@@ -9,11 +9,12 @@ from torch.utils.tensorboard import SummaryWriter
 
 from game.ko_tron import KOTron, GameStatus
 from AI.algos import (
-    StandardTronModel,
     choose_direction_model_naive,
     choose_direction_random,
+    choose_direction_minimax,
 )
 from AI.model_architectures import EvaluationNetConv3OneStride
+from AI.tron_model import StandardTronModel
 
 from AI.training import train_loop, make_dataloader, get_weights_sum_of_squares
 
@@ -24,13 +25,13 @@ if __name__ == "__main__":
     # INITIALIZE MODELS
     ############################################
 
-    device = torch.device("cuda")
+    device = torch.device("cpu")
 
     state_dict = torch.load(
-        "C://Users//kylan//Documents//code//repos//KOTron//python//tasks//2024_12_refactor//model_state.pth"
+        "C://Users//kylan//Documents//code//repos//KOTron//python//tasks//2024_12_4_refactor//model_state.pth"
     )
     torch_model = EvaluationNetConv3OneStride(grid_dim=10)
-    #torch_model.load_state_dict(state_dict)
+    torch_model.load_state_dict(state_dict)
     torch_model = torch_model.to(device)
 
     model = StandardTronModel(torch_model, device)
@@ -49,7 +50,7 @@ if __name__ == "__main__":
     # TENSORBOARD AND MODEL CHECKPOINT SETUP
     ############################################
 
-    run_uid = "prototype_v1"
+    run_uid = "minmax_v1"
 
     outer_run_folder = Path(__file__).resolve().parent / "runs"
     outer_run_folder.mkdir(exist_ok=True)
@@ -69,8 +70,8 @@ if __name__ == "__main__":
     # SIMULATION-TRAIN LOOP
     ############################################
 
-    n_train_sim_cycles = 200
-    n_games_per_loop = 500
+    n_train_sim_cycles = 1
+    n_games_per_loop = 50
 
     for train_iter in range(n_train_sim_cycles):
 
@@ -86,10 +87,13 @@ if __name__ == "__main__":
 
             while game.status == GameStatus.IN_PROGRESS:
 
-                p1_direction_update = choose_direction_model_naive(
-                    game, player_index=0, model=model
+                p1_direction_update = choose_direction_minimax(
+                    model, game, player_index=0, opponent_index=1, depth=3
                 )
-                p2_direction_update = choose_direction_random(game, player_index=1)
+
+                p2_direction_update = choose_direction_model_naive(
+                    model, game, player_index=1
+                )
 
                 game = KOTron.next(
                     game, direction_updates=[p1_direction_update, p2_direction_update]
@@ -117,14 +121,14 @@ if __name__ == "__main__":
             train_iter,
         )
 
-        print(f"Training time! Iter: {train_iter}")
+        # print(f"Training time! Iter: {train_iter}")
 
-        dataloader = make_dataloader(
-            all_game_states, model, batch_size=batch_size, shuffle=shuffle
-        )
+        # dataloader = make_dataloader(
+        #     all_game_states, model, batch_size=batch_size, shuffle=shuffle
+        # )
 
-        avg_loss, avg_pred_magnitude = train_loop(model.model, dataloader, optimizer, criterion, device, epochs=1)
+        # avg_loss, avg_pred_magnitude = train_loop(model.model, dataloader, optimizer, criterion, device, epochs=1)
 
-        tb_writer.add_scalar("Sum of Squares of Weights", get_weights_sum_of_squares(model.model), train_iter)
-        tb_writer.add_scalar("Average Loss", avg_loss, train_iter)
-        tb_writer.add_scalar("Average Prediction Magnitude", avg_pred_magnitude, train_iter)
+        # tb_writer.add_scalar("Sum of Squares of Weights", get_weights_sum_of_squares(model.model), train_iter)
+        # tb_writer.add_scalar("Average Loss", avg_loss, train_iter)
+        # tb_writer.add_scalar("Average Prediction Magnitude", avg_pred_magnitude, train_iter)
