@@ -1,4 +1,5 @@
 import pygame
+from pygame.locals import *
 
 LENGTH = 800
 WIDTH = 800
@@ -6,9 +7,12 @@ SPEED = 500
 
 WHITE = [255, 255, 255]
 BLACK = [0, 0, 0]
-BLUE = [0, 0, 255]
+BLUE = [14, 35, 173]
 PURPLE = [255, 0, 255]
-RED = [255, 0, 0]
+RED = [173, 3, 23]
+GREEN = [3, 173, 49]
+
+WALLS = [89, 89, 89]
 
 COLORS = [BLUE, PURPLE, RED, BLACK]
 #
@@ -30,29 +34,35 @@ def show_game_state(game):
     global gui_initialized
 
     if not gui_initialized:
-        init_utility_gui(game.dimension)
+        init_utility_gui(len(game.grid))
         gui_initialized = True
 
-    screen.fill([0, 255, 0])
-    for racer in game.players:
-        for i in range(game.dimension):
-            for j in range(game.dimension):
+    screen.fill([25, 25, 25])
+    for player in game.players:
+        for row in range(len(game.grid)):
+            for col in range(len(game.grid[0])):
 
-                player_num = game.collision_table[i][j]
-                x, y = i * screen_factor, j * screen_factor
-                if player_num == 1:
-                    color = COLORS[0]
-                    screen.fill(color, pygame.Rect(x, y, screen_factor, screen_factor))
+                if game.grid[row][col]:
+                    x, y = col * screen_factor, row * screen_factor
+                    screen.fill(WALLS, pygame.Rect(x, y, screen_factor, screen_factor))
 
-                if player_num == 2:
-                    color = COLORS[1]
-                    screen.fill(color, pygame.Rect(x, y, screen_factor, screen_factor))
+    for (i, player) in enumerate(game.players):
 
-    for racer in game.players:
-        headx, heady = racer.head[0] * screen_factor, racer.head[1] * screen_factor
-        screen.fill(BLACK, pygame.Rect(headx, heady, screen_factor, screen_factor))
+        color = GREEN if i == 0 else RED
+        headx, heady = player.col * screen_factor, player.row * screen_factor
+        screen.fill(color, pygame.Rect(headx, heady, screen_factor, screen_factor))
 
     pygame.event.pump()
     pygame.display.flip()
     clock.tick(20)
+
+    waiting = True
+    while waiting:
+        for event in pygame.event.get():
+            if event.type == QUIT:
+                pygame.quit()
+                exit()
+            elif event.type == KEYDOWN:
+                if event.key == K_RIGHT:
+                    waiting = False
 

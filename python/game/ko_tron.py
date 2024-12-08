@@ -2,7 +2,7 @@ import random
 from enum import Enum, StrEnum, auto
 from copy import deepcopy
 from dataclasses import dataclass
-
+from functools import lru_cache
 
 import numpy as np
 
@@ -34,6 +34,21 @@ class Player:
         self.direction = direction
         self.can_move = can_move
 
+    def __eq__(self, other):
+        if not isinstance(other, Player):
+            return False
+        return (
+            self.row == other.row
+            and self.col == other.col
+            and self.direction == other.direction
+            and self.can_move == other.can_move
+        )
+
+    def __hash__(self):
+        return hash(
+            (hash(self.row), hash(self.col), hash(self.direction), hash(self.can_move))
+        )
+
 
 class GameStatus(Enum):
 
@@ -45,7 +60,7 @@ class GameStatus(Enum):
     P4_WIN = auto()
 
     @staticmethod
-    def index_of_winner(status: 'GameStatus'):
+    def index_of_winner(status: "GameStatus"):
         if status == GameStatus.P1_WIN:
             return 0
         if status == GameStatus.P2_WIN:
@@ -59,6 +74,17 @@ class DirectionUpdate:
     direction: Direction
     player_index: int
 
+    def __eq__(self, other):
+        if not isinstance(other, DirectionUpdate):
+            return False
+        return (
+            self.direction == other.direction
+            and self.player_index == other.player_index
+        )
+
+    def __hash__(self):
+        return hash((self.direction, self.player_index))
+
 
 @dataclass
 class DefaultStart:
@@ -71,7 +97,7 @@ class KOTron:
 
     TWO_PLAYER_DEFAULT_STARTS = [
         DefaultStart(row_fraction=0.5, col_fraction=0.25, direction=Direction.RIGHT),
-        DefaultStart(row_fraction=0.5, col_fraction=0.25, direction=Direction.RIGHT),
+        DefaultStart(row_fraction=0.5, col_fraction=0.75, direction=Direction.LEFT),
     ]
     # TODO:
     # THREE_PLAYER_DEFAULT_STARTS = [...]
@@ -84,7 +110,9 @@ class KOTron:
 
         self.grid = np.zeros((num_rows, num_cols), dtype=bool)
         self.status = GameStatus.IN_PROGRESS
-        self.players = []
+
+        # Becomes self.players Tuple after Player objects are appended
+        player_list = []
 
         starts = set()
         if random_starts:
@@ -96,7 +124,7 @@ class KOTron:
                 )
                 if random_start not in starts:
                     starts.add(random_start)
-                    self.players.append(
+                    player_list.append(
                         Player(
                             random_start[0],
                             random_start[1],
@@ -114,25 +142,49 @@ class KOTron:
 
             for i in range(num_players):
 
-                self.players.append(
+                player_list.append(
                     Player(
-                        row=int(default_starts[i][0] * num_rows),
-                        col=int(default_starts[i][1] * num_cols),
-                        direction=Direction.up,
+                        row=int(default_starts[i].row_fraction * num_rows),
+                        col=int(default_starts[i].col_fraction * num_cols),
+                        direction=default_starts[i].direction,
                         can_move=True,
                     )
                 )
 
+        self.players = tuple(player_list)
+
+    def __eq__(self, other):
+        if not isinstance(other, KOTron):
+            return False
+        return (
+            np.array_equal(self.grid, other.grid)
+            and self.status == other.status
+            and self.players == other.players
+        )
+
+    def __hash__(self):
+
+        return hash((self.grid.tobytes(), self.status, self.players))
+
+    @lru_cache(maxsize=None)
+    def lru_cache_next(game: "KOTron", direction_updates: DirectionUpdate):
+        return KOTron.next(game, direction_updates)
 
     @staticmethod
-    def next(game: "KOTron", direction_updates: list[DirectionUpdate]) -> "KOTron":
+    def next(game: "KOTron", direction_updates: tuple[DirectionUpdate]) -> "KOTron":
 
         assert game.status == GameStatus.IN_PROGRESS
+        assert isinstance(direction_updates, tuple)
 
+        # TODO: Make this quicker and avoid deepcopy somehow
         next_game_state = deepcopy(game)
 
+        # NOTE: It would be nice to not have to modify any Player objects
+        # Instead, create the new objects with the updated direction
         for dir_update in direction_updates:
-            next_game_state.players[dir_update.player_index].direction = dir_update.direction
+            next_game_state.players[dir_update.player_index].direction = (
+                dir_update.direction
+            )
 
         for player in next_game_state.players:
             if player.can_move:
@@ -146,7 +198,6 @@ class KOTron:
                     player.col = new_col
                 else:
                     player.can_move = False
-
 
         # Case where players attempt to occupy same square
         for i in range(len(next_game_state.players)):
@@ -171,7 +222,7 @@ class KOTron:
     @staticmethod
     def in_bounds(grid: np.ndarray, row: int, col: int):
         return 0 <= row < grid.shape[0] and 0 <= col < grid.shape[1]
-    
+
     @staticmethod
     def get_status(players: list[Player]):
 
@@ -195,9 +246,8 @@ class KOTron:
             else:
                 raise NotImplementedError()
 
-
     @staticmethod
-    def get_possible_directions(game: 'KOTron', player_index):
+    def get_possible_directions(game: "KOTron", player_index):
         available_directions = []
         player = game.players[player_index]
 
@@ -206,11 +256,13 @@ class KOTron:
             dr, dc = dir.value
             new_row, new_col = player.row + dr, player.col + dc
 
-            if KOTron.in_bounds(game.grid, new_row, new_col) and not game.grid[new_row, new_col]:
+            if (
+                KOTron.in_bounds(game.grid, new_row, new_col)
+                and not game.grid[new_row, new_col]
+            ):
                 available_directions.append(dir)
 
         return available_directions
-
 
     # TODO: Where should this live?
     # """
@@ -233,4 +285,3 @@ class KOTron:
     #     json_dict = {"grid": self.grid, "players": player_list}
 
     #     return json.dumps(json_dict)
-
