@@ -2,12 +2,12 @@ import pytest
 import torch
 import random
 
-from AI.pytorch_game_utils import (
+from ai.pytorch_game_utils import (
     get_position_evaluation,
     get_model_input_from_raw_info,
     GameResult,
 )
-from game.ko_tron import KOTron
+from game.tron import Tron
 
 # TODO:
 device = "cuda"
@@ -17,7 +17,7 @@ device = "cuda"
 def test_get_model_input_from_raw_info():
 
     for i in range(100):
-        game = KOTron(num_players=2, dimension=random.randint(4, 40), random_starts=True)
+        game = Tron(num_players=2, dimension=random.randint(4, 40), random_starts=True)
 
         player_num = 0
 

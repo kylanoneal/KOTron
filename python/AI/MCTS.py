@@ -1,12 +1,12 @@
 import numpy as np
 from copy import deepcopy
 
-from AI.pytorch_game_utils import get_model_input_from_raw_info, get_relevant_info_from_game_state
-from game.ko_tron import KOTron
+from ai.pytorch_game_utils import get_model_input_from_raw_info, get_relevant_info_from_game_state
+from game.tron import Tron
 
 
 class Node:
-    def __init__(self, state: KOTron, player_num, parent=None):
+    def __init__(self, state: Tron, player_num, parent=None):
         self.state = state
         self.player_num = player_num
         self.parent = parent

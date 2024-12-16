@@ -1,0 +1,35 @@
+# Model checkpoints
+*.pt
+*.pth
+*.onnx
+
+# Misc
+*.json
+*.txt
+*.prof
+*.sarif
+*kanbn*/
+
+# Logging data
+*runs*/
+*logs*/
+
+# Rust stuff
+*target*/
+*.lock
+*.svg
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+

@@ -2,8 +2,8 @@ import torch
 import numpy as np
 from torch.utils.data import Dataset, DataLoader
 
-from game.ko_tron import KOTron, GameStatus
-from AI.algos import TronModelAbstract
+from game.tron import Tron, GameStatus
+from ai.algos import TronModelAbstract
 
 # NOTE: Where does this belong?
 def get_weights_sum_of_squares(model):
@@ -16,7 +16,7 @@ def get_weights_sum_of_squares(model):
 
 
 def make_dataloader(
-    games_list: list[list[KOTron]], model: TronModelAbstract, batch_size: int, shuffle: bool = True
+    games_list: list[list[Tron]], model: TronModelAbstract, batch_size: int, shuffle: bool = True
 ) -> DataLoader:
 
     dataset = []

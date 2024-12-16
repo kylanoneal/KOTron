@@ -1,3 +1,5 @@
+from game.tron import Direction
+
 import pygame
 from pygame.locals import *
 
@@ -64,5 +66,14 @@ def show_game_state(game):
                 exit()
             elif event.type == KEYDOWN:
                 if event.key == K_RIGHT:
-                    waiting = False
+                    return None
+                if event.key == K_w:
+                    return Direction.UP
+                if event.key == K_a:
+                    return Direction.LEFT
+                if event.key == K_s:
+                    return Direction.DOWN
+                if event.key == K_d:
+                    return Direction.RIGHT
+
 
