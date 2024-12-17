@@ -8,12 +8,17 @@ from pathlib import Path
 
 from torch.utils.tensorboard import SummaryWriter
 
-from game.tron import Tron, GameStatus
-from ai.algos import (
-    choose_direction_model_naive,
-    choose_direction_random,
-    choose_direction_minimax,
-)
+from game.tron import Tron, GameStatus, DirectionUpdate, Direction
+from game.utility_gui import show_game_state
+
+# from ai.algos import (
+#     choose_direction_model_naive,
+#     choose_direction_random,
+#     choose_direction_minimax,
+# )
+
+from ai.minimax import minimax_alpha_beta_eval_all
+
 from ai.model_architectures import FastNet, EvaluationNetConv3OneStride
 from ai.tron_model import StandardTronModel
 
@@ -31,7 +36,6 @@ if __name__ == "__main__":
     state_dict = torch.load(
         "C:/Users/kylan/Documents/code/repos/KOTron/python/tasks/2024_12_15_alpha_beta/oldnet_self_train_continuation_v5_8.pth"
     )
-
 
     torch_model = EvaluationNetConv3OneStride(grid_dim=10)
     torch_model.load_state_dict(state_dict)
@@ -78,13 +82,11 @@ if __name__ == "__main__":
     # SIMULATION-TRAIN LOOP
     ############################################
 
-
-
     all_game_states = []
 
     games_tied = p1_wins = p2_wins = 0
 
-    for i in range(2):
+    for i in range(10):
 
         game = Tron(num_players=2, num_rows=10, num_cols=10, random_starts=False)
 
@@ -95,17 +97,30 @@ if __name__ == "__main__":
             ab_index = i
             basic_index = (i + 1) % 2
 
-            ab_dir_update = choose_direction_minimax(
-                model, game, player_index=ab_index, opponent_index=basic_index, depth=5, do_alpha_beta=True
+            p1_dir_update = minimax_alpha_beta_eval_all(
+                model,
+                game,
+                depth=7,
+                maximizing_player_index=0,
+                minimizing_player_index=1,
+                is_maximizing_player=True,
+                is_root=True,
             )
 
-            basic_dir_update = choose_direction_minimax(
-                model, game, player_index=basic_index, opponent_index=ab_index, depth=5, do_alpha_beta=False
-            )
+            # p2_dir_update = minimax_alpha_beta_eval_all(
+            #     model,
+            #     game,
+            #     depth=4,
+            #     maximizing_player_index=1,
+            #     minimizing_player_index=0,
+            #     is_maximizing_player=True,
+            #     is_root=True,
+            # )
 
-            game = Tron.next(
-                game, direction_updates=(ab_dir_update, basic_dir_update)
-            )
+            p2_dir_update = DirectionUpdate(show_game_state(game), player_index=1)
+            
+
+            game = Tron.next(game, direction_updates=(p1_dir_update, p2_dir_update))
 
             curr_game_states.append(game)
 
@@ -119,4 +134,3 @@ if __name__ == "__main__":
             p2_wins += 1
 
     print(f"P1 wins: {p1_wins}, p2 wins: {p2_wins}, ties: {games_tied}")
-

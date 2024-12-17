@@ -1,8 +1,9 @@
 import numpy as np
 import sys
+from typing import Union
 from cachetools import LRUCache, cached
 
-from game.tron import Tron, GameStatus, DirectionUpdate
+from game.tron import Tron, GameStatus, DirectionUpdate, Direction
 from ai.tron_model import TronModelAbstract
 
 
@@ -17,6 +18,140 @@ def lru_eval(model: TronModelAbstract, game, player_index):
 
 
 def minimax_alpha_beta_eval_all(
+    model: TronModelAbstract,
+    game_state: Tron,
+    depth: int,
+    maximizing_player_index,
+    minimizing_player_index,
+    is_maximizing_player: bool,
+    is_root: bool = False,
+    alpha: float = float("-inf"),
+    beta: float = float("inf"),
+    maximizing_player_move=None,
+) -> Union[float, DirectionUpdate]:
+
+    if game_state.status != GameStatus.IN_PROGRESS:
+
+        if game_state.status == GameStatus.TIE:
+            return 0.0
+        else:
+            raise RuntimeError("Winning terminal state should never be reached here.")
+            if GameStatus.index_of_winner(game_state.status) == maximizing_player_index:
+                return float("inf")
+            else:
+                return float("-inf")
+
+    if depth == 0:
+        return lru_eval(model, game_state, maximizing_player_index)
+
+    if is_maximizing_player:
+        max_eval = float("-inf")
+
+        possible_directions = Tron.get_possible_directions(
+            game_state, maximizing_player_index
+        )
+
+        # Handle no possible directions - maybe other player doesn't either
+        if len(possible_directions) == 0:
+
+            # Nowhere to go, just return up
+            if is_root:
+                return DirectionUpdate(Direction.UP, maximizing_player_index)
+            opponent_possible_directions = Tron.get_possible_directions(
+                game_state, minimizing_player_index
+            )
+
+            # This is a tie
+            if len(opponent_possible_directions) == 0:
+                return 0.0
+            # Loss
+            else:
+                return -100.0
+
+        for direction in possible_directions:
+
+            # TODO: Heuristic move ordering here? Doesn't really make sense
+            # to eval a position without both players' move
+            eval = minimax_alpha_beta_eval_all(
+                model,
+                game_state,
+                depth,
+                maximizing_player_index=maximizing_player_index,
+                minimizing_player_index=minimizing_player_index,
+                is_maximizing_player=False,
+                alpha=alpha,
+                beta=beta,
+                maximizing_player_move=direction,
+            )
+
+            if eval > max_eval:
+                max_eval = eval
+                best_dir = direction
+
+            alpha = max(alpha, eval)
+            if beta <= alpha:
+                break
+
+        return (
+            DirectionUpdate(best_dir, maximizing_player_index) if is_root else max_eval
+        )
+    else:
+        min_eval = float("inf")
+
+        possible_directions = Tron.get_possible_directions(
+            game_state, minimizing_player_index
+        )
+
+        if len(possible_directions) == 0:
+            return 100.0
+
+        child_states = []
+        cached_model_evals = []
+
+        child_states = [
+            Tron.lru_cache_next(
+                game_state,
+                direction_updates=(
+                    DirectionUpdate(maximizing_player_move, maximizing_player_index),
+                    DirectionUpdate(direction, minimizing_player_index),
+                ),
+            )
+            for direction in possible_directions
+        ]
+
+        # Sort child states by cached eval
+        # Ascending oder (for minimizing player, lowest evaluations are most promising)
+        # sorted_child_states = sorted(
+        #     child_states,
+        #     key=lambda child_state: lru_eval(
+        #         model, child_state, maximizing_player_index
+        #     ),
+        # )
+
+        sorted_child_states = child_states
+
+        for child_state in sorted_child_states:
+            eval = minimax_alpha_beta_eval_all(
+                model,
+                child_state,
+                depth - 1,
+                maximizing_player_index=maximizing_player_index,
+                minimizing_player_index=minimizing_player_index,
+                is_maximizing_player=True,
+                alpha=alpha,
+                beta=beta,
+            )
+            min_eval = min(min_eval, eval)
+            beta = min(beta, eval)
+
+            if beta <= alpha:
+                break
+
+        return min_eval
+
+
+# TODO: Fix not handling ties correctly
+def minimax_alpha_beta(
     model: TronModelAbstract,
     game_state: Tron,
     depth: int,
@@ -43,6 +178,7 @@ def minimax_alpha_beta_eval_all(
         return model.run_inference([game_state], maximizing_player_index)[0]
 
     if is_maximizing_player:
+
         max_eval = float("-inf")
 
         possible_directions = Tron.get_possible_directions(
@@ -64,9 +200,7 @@ def minimax_alpha_beta_eval_all(
 
         for direction in possible_directions:
 
-            # TODO: Heuristic move ordering here? Doesn't really make sense
-            # to eval a position without both players' move
-            eval = minimax_alpha_beta_eval_all(
+            eval = minimax_alpha_beta(
                 model,
                 game_state,
                 depth,
@@ -85,34 +219,17 @@ def minimax_alpha_beta_eval_all(
         return max_eval
     else:
         min_eval = float("inf")
-
-        possible_directions = Tron.get_possible_directions(
+        for direction in Tron.get_possible_directions(
             game_state, minimizing_player_index
-        )
-
-        if len(possible_directions) == 0:
-            return float("inf")
-
-        child_states = []
-        cached_model_evals = []
-
-        child_states = [
-            Tron.lru_cache_next(
+        ):
+            child_state = Tron.lru_cache_next(
                 game_state,
                 direction_updates=(
                     DirectionUpdate(maximizing_player_move, maximizing_player_index),
                     DirectionUpdate(direction, minimizing_player_index),
                 ),
             )
-            for direction in possible_directions
-        ]
-
-        # Sort child states by cached eval
-        # Ascending oder (for minimizing player, lowest evaluations are most promising)
-        sorted_child_states = sorted(child_states, key=lambda child_state: lru_eval(model, child_state, maximizing_player_index))
-
-        for child_state in sorted_child_states:
-            eval = minimax_alpha_beta_eval_all(
+            eval = minimax_alpha_beta(
                 model,
                 child_state,
                 depth - 1,
@@ -130,85 +247,6 @@ def minimax_alpha_beta_eval_all(
 
         return min_eval
 
-
-# TODO: Fix not handling ties correctly
-# def minimax_alpha_beta(
-#     model: TronModelAbstract,
-#     game_state: Tron,
-#     depth: int,
-#     alpha: float,
-#     beta: float,
-#     is_maximizing_player: bool,
-#     maximizing_player_index,
-#     minimizing_player_index,
-#     maximizing_player_move=None,
-# ) -> float:
-
-#     if game_state.status != GameStatus.IN_PROGRESS:
-
-#         if game_state.status == GameStatus.TIE:
-#             return 0.0
-#         else:
-#             if GameStatus.index_of_winner(game_state.status) == maximizing_player_index:
-#                 return float("inf")
-#             else:
-#                 return float("-inf")
-
-#     if depth == 0:
-#         return model.run_inference([game_state], maximizing_player_index)[0]
-
-#     if is_maximizing_player:
-#         max_eval = -float("inf")
-#         for direction in Tron.get_possible_directions(
-#             game_state, maximizing_player_index
-#         ):
-
-#             eval = minimax_alpha_beta(
-#                 model,
-#                 game_state,
-#                 depth,
-#                 alpha,
-#                 beta,
-#                 is_maximizing_player=False,
-#                 maximizing_player_index=maximizing_player_index,
-#                 minimizing_player_index=minimizing_player_index,
-#                 maximizing_player_move=direction,
-#             )
-#             max_eval = max(max_eval, eval)
-#             alpha = max(alpha, eval)
-#             if beta <= alpha:
-#                 break
-
-#         return max_eval
-#     else:
-#         min_eval = float("inf")
-#         for direction in Tron.get_possible_directions(
-#             game_state, minimizing_player_index
-#         ):
-#             child_state = Tron.lru_cache_next(
-#                 game_state,
-#                 direction_updates=(
-#                     DirectionUpdate(maximizing_player_move, maximizing_player_index),
-#                     DirectionUpdate(direction, minimizing_player_index),
-#                 ),
-#             )
-#             eval = minimax_alpha_beta(
-#                 model,
-#                 child_state,
-#                 depth - 1,
-#                 alpha,
-#                 beta,
-#                 is_maximizing_player=True,
-#                 maximizing_player_index=maximizing_player_index,
-#                 minimizing_player_index=minimizing_player_index,
-#             )
-#             min_eval = min(min_eval, eval)
-#             beta = min(beta, eval)
-
-#             if beta <= alpha:
-#                 break
-
-#         return min_eval
 
 # TODO: Fix not handling ties correctly
 def basic_minimax(

@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 
 from game.tron import Tron, DirectionUpdate
 from ai.tron_model import TronModelAbstract
-from ai.minimax import minimax_alpha_beta_eval_all, basic_minimax, minimax_dumb
+from ai.minimax import minimax_alpha_beta_eval_all, basic_minimax, minimax_dumb, minimax_alpha_beta
 
 
 def choose_direction_model_naive(
@@ -62,6 +62,7 @@ def choose_direction_minimax(
     opponent_index: int,
     depth: int,
     do_alpha_beta: bool = True,
+    do_lru_eval: bool = True,
 ) -> DirectionUpdate:
 
     assert game.players[player_index].can_move
@@ -99,16 +100,29 @@ def choose_direction_minimax(
             new_state = Tron.next(game, dir_updates)
 
             if do_alpha_beta:
-                move_value = minimax_alpha_beta_eval_all(
-                    model,
-                    new_state,
-                    depth - 1,
-                    alpha=float("-inf"),
-                    beta=float("inf"),
-                    is_maximizing_player=True,
-                    maximizing_player_index=player_index,
-                    minimizing_player_index=opponent_index,
-                )
+
+                if do_lru_eval:
+                    move_value = minimax_alpha_beta_eval_all(
+                        model,
+                        new_state,
+                        depth - 1,
+                        alpha=float("-inf"),
+                        beta=float("inf"),
+                        is_maximizing_player=True,
+                        maximizing_player_index=player_index,
+                        minimizing_player_index=opponent_index,
+                    )
+                else:
+                    move_value = minimax_alpha_beta(
+                        model,
+                        new_state,
+                        depth - 1,
+                        alpha=float("-inf"),
+                        beta=float("inf"),
+                        is_maximizing_player=True,
+                        maximizing_player_index=player_index,
+                        minimizing_player_index=opponent_index,
+                    )
             else:
 
                 move_value = basic_minimax(
