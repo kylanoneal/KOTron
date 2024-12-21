@@ -4,7 +4,29 @@ from typing import Union
 from cachetools import LRUCache, cached
 
 from game.tron import Tron, GameStatus, DirectionUpdate, Direction
-from ai.tron_model import TronModelAbstract
+from AI.tron_model import TronModelAbstract
+
+# TODO: Change args to player pos, opponent pos, direction?
+def heuristic_towards_opponent(game: Tron, hero_index: int, opponent_index: int, direction: Direction):
+    direction.value[0]
+
+    opponent_right = game.players[opponent_index].col > game.players[hero_index].col
+    opponent_down = game.players[opponent_index].row > game.players[hero_index].row
+
+    if opponent_right and direction == Direction.RIGHT:
+        return 1.0
+    elif opponent_down and direction == Direction.DOWN:
+        return 1.0
+    
+    opponent_left = game.players[opponent_index].col < game.players[hero_index].col
+    opponent_up = game.players[opponent_index].row < game.players[hero_index].row
+
+    if opponent_left and direction == Direction.LEFT:
+        return 1.0
+    if opponent_up and direction == Direction.UP:
+        return 1.0
+
+    return -1.0
 
 
 # TODO: This should probably be in different spot
@@ -64,14 +86,24 @@ def minimax_alpha_beta_eval_all(
             # This is a tie
             if len(opponent_possible_directions) == 0:
                 return 0.0
-            # Loss
+            # Guaranteed loss for maximizing player, eval is relative to depth.
+            # Losses at deeper depths will be preffered to those at shallower depths.
+            # Encourages bot to stay alive because a human could easily not play optimally.
             else:
-                return -100.0
+                return -100.0 * depth
+            
 
-        for direction in possible_directions:
+        # Heuristic sorting (descending order for maximizing player)
+        sorted_directions = sorted(
+            possible_directions,
+            key=lambda dir: heuristic_towards_opponent(
+                game_state, maximizing_player_index, minimizing_player_index, dir
+            ),
+            reverse=True
+        )
 
-            # TODO: Heuristic move ordering here? Doesn't really make sense
-            # to eval a position without both players' move
+        for direction in sorted_directions:
+
             eval = minimax_alpha_beta_eval_all(
                 model,
                 game_state,
@@ -93,7 +125,7 @@ def minimax_alpha_beta_eval_all(
                 break
 
         return (
-            DirectionUpdate(best_dir, maximizing_player_index) if is_root else max_eval
+            max_eval if not is_root else DirectionUpdate(best_dir, maximizing_player_index)
         )
     else:
         min_eval = float("inf")
@@ -102,11 +134,10 @@ def minimax_alpha_beta_eval_all(
             game_state, minimizing_player_index
         )
 
+        # Guaranteed win for maximizing player, eval is relative to depth
         if len(possible_directions) == 0:
-            return 100.0
+            return 100.0 * depth
 
-        child_states = []
-        cached_model_evals = []
 
         child_states = [
             Tron.lru_cache_next(
@@ -121,12 +152,12 @@ def minimax_alpha_beta_eval_all(
 
         # Sort child states by cached eval
         # Ascending oder (for minimizing player, lowest evaluations are most promising)
-        # sorted_child_states = sorted(
-        #     child_states,
-        #     key=lambda child_state: lru_eval(
-        #         model, child_state, maximizing_player_index
-        #     ),
-        # )
+        sorted_child_states = sorted(
+            child_states,
+            key=lambda child_state: lru_eval(
+                model, child_state, maximizing_player_index
+            ),
+        )
 
         sorted_child_states = child_states
 
