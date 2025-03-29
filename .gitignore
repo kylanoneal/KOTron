@@ -9,6 +9,7 @@
 *.prof
 *.sarif
 *kanbn*/
+*.bin
 
 # Logging data
 *runs*/

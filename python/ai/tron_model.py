@@ -2,19 +2,19 @@ import torch
 import numpy as np
 from abc import ABC, abstractmethod
 
-from game.tron import Tron
+from game.tron import GameState
 
 
 class TronModelAbstract(ABC):
 
     @abstractmethod
     def get_model_input(
-        self, game_states: list[Tron], player_index: int
+        self, game_states: list[GameState], player_index: int
     ) -> torch.Tensor:
         pass
 
     @abstractmethod
-    def run_inference(self, game_states: list[Tron], player_index: int) -> list[float]:
+    def run_inference(self, game_states: list[GameState], player_index: int) -> list[float]:
         pass
 
 
@@ -25,7 +25,7 @@ class StandardTronModel(TronModelAbstract):
         self.model = model
 
     def get_model_input(
-        self, game_states: list[Tron], player_index: int
+        self, game_states: list[GameState], player_index: int
     ) -> torch.Tensor:
 
         bool_array = (
@@ -56,7 +56,7 @@ class StandardTronModel(TronModelAbstract):
 
         return tensor_output
 
-    def run_inference(self, game_states: list[Tron], player_index: int) -> np.ndarray:
+    def run_inference(self, game_states: list[GameState], player_index: int) -> np.ndarray:
 
         # NOTE: Maybe should have a way to set requries_grad = False for infernce time
         model_input = self.get_model_input(game_states, player_index)

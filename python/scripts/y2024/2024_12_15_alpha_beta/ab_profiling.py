@@ -9,15 +9,15 @@ from pathlib import Path
 from torch.utils.tensorboard import SummaryWriter
 
 from game.tron import Tron, GameStatus, DirectionUpdate, Direction
-from game.utility_gui import show_game_state
+# from game.utility_gui import show_game_state
 
-# from ai.algos import (
-#     choose_direction_model_naive,
-#     choose_direction_random,
-#     choose_direction_minimax,
-# )
+from ai.algos import (
+    #choose_direction_model_naive,
+    choose_direction_random,
+    #choose_direction_minimax,
+)
 
-from ai.minimax import minimax_alpha_beta_eval_all
+from ai.minimax import minimax_alpha_beta_eval_all, minimax_stack
 
 from ai.model_architectures import FastNet, EvaluationNetConv3OneStride
 from ai.tron_model import StandardTronModel
@@ -86,7 +86,7 @@ if __name__ == "__main__":
 
     games_tied = p1_wins = p2_wins = 0
 
-    for i in range(10):
+    for i in range(1):
 
         game = Tron(num_players=2, num_rows=10, num_cols=10, random_starts=False)
 
@@ -94,30 +94,41 @@ if __name__ == "__main__":
 
         while game.status == GameStatus.IN_PROGRESS:
 
-            ab_index = i
-            basic_index = (i + 1) % 2
+            # ab_index = i
+            # basic_index = (i + 1) % 2
 
             p1_dir_update = minimax_alpha_beta_eval_all(
                 model,
                 game,
-                depth=7,
+                depth=6,
                 maximizing_player_index=0,
                 minimizing_player_index=1,
                 is_maximizing_player=True,
                 is_root=True,
+                debug_mode=True
             )
 
-            # p2_dir_update = minimax_alpha_beta_eval_all(
-            #     model,
-            #     game,
-            #     depth=4,
-            #     maximizing_player_index=1,
-            #     minimizing_player_index=0,
-            #     is_maximizing_player=True,
-            #     is_root=True,
-            # )
+            p2_dir_update = minimax_alpha_beta_eval_all(
+                model,
+                game,
+                depth=6,
+                maximizing_player_index=1,
+                minimizing_player_index=0,
+                is_maximizing_player=True,
+                is_root=True,
+                debug_mode=True
+            )
 
-            p2_dir_update = DirectionUpdate(show_game_state(game), player_index=1)
+            # p2_dir_update = choose_direction_random(game, 1)
+
+            # while len(minimax_stack) > 0:
+            #     explored_state = minimax_stack.pop(0)
+            #     show_game_state(explored_state.game_state, explored_state)
+
+            # p2_dir_update = DirectionUpdate(show_game_state(game), player_index=1)
+
+            print(f"\nP1: {p1_dir_update.direction}")
+            print(f"P2: {p2_dir_update.direction}")
             
 
             game = Tron.next(game, direction_updates=(p1_dir_update, p2_dir_update))

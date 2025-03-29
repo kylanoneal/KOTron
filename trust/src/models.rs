@@ -1,6 +1,6 @@
 use std::io::Cursor;
 
-use crate::game::GameState;
+use crate::tron::GameState;
 
 use ndarray::Array4;
 use ndarray::ArrayViewD;
@@ -12,7 +12,7 @@ use tract_onnx::prelude::*;
 use anyhow::Result;
 
 pub trait Model {
-    fn run_inference(&self, game_states: &Vec<GameState>, player_index: usize) -> Result<Vec<f32>>;
+    fn run_inference(&self, game_states: &Vec<&GameState>, player_index: usize) -> Result<Vec<f32>>;
 }
 
 #[derive(Debug)]
@@ -46,7 +46,7 @@ impl TractModel {
 }
 
 impl Model for TractModel {
-    fn run_inference(&self, game_states: &Vec<GameState>, player_index: usize) -> Result<Vec<f32>> {
+    fn run_inference(&self, game_states: &Vec<&GameState>, player_index: usize) -> Result<Vec<f32>> {
         // Example input tensor
 
         let mut input: Array4<f32> =

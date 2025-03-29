@@ -1,6 +1,13 @@
 pub mod algos;
-pub mod game;
+pub mod tron;
 pub mod models;
+pub mod minimax;
+pub mod io;
+
+pub mod tron_pb {
+    include!(concat!(env!("OUT_DIR"), "/tron_pb.rs"));
+}
+
 
 use console_error_panic_hook;
 use once_cell::sync::OnceCell;
@@ -10,8 +17,9 @@ use wasm_bindgen::prelude::*;
 
 use im::{vector, Vector};
 
-use algos::choose_direction_model_naive;
-use game::{Direction, DirectionUpdate, GameState, Player};
+// use algos::choose_direction_model_naive;
+use tron::{Direction, DirectionUpdate, GameState, Player};
+use minimax::{minimax_alpha_beta_eval_all, MinimaxContext, MinimaxResult};
 use models::TractModel;
 
 static TRACT_MODEL: OnceCell<TractModel> = OnceCell::new();
@@ -65,31 +73,44 @@ pub fn run_engine(
         .get()
         .expect("TRACT_MODEL is not initialized. Did #[wasm_bindgen(start)] run?");
 
-    let p1 = Player {
+    let hero = Player {
         row: player_row,
         col: player_col,
-        direction: Direction::Up,
         can_move: true,
     };
 
-    let p2 = Player {
+    let villain = Player {
         row: opponent_row,
         col: opponent_col,
-        direction: Direction::Up,
         can_move: true,
     };
 
-    let players: Vector<Player> = vector![p1, p2];
+    let players: Vector<Player> = vector![hero, villain];
 
     let grid: Vector<Vector<bool>> = flatten_to_im_vector(data, num_rows, num_cols);
 
-    let mut game: GameState = GameState::new(players, 10, 10);
+    let mut game: GameState = tron::new_game(players, 10, 10);
     // Make a different constructor for this purpose
     game.grid = grid;
 
-    let dir_update: DirectionUpdate = choose_direction_model_naive(&game, 0, model);
 
-    let (row_offset, col_offset) = dir_update.direction.value();
+    let hero_mm_result: MinimaxResult = minimax_alpha_beta_eval_all(
+        &game,
+        4,
+        true,
+        f32::NEG_INFINITY,
+        f32::INFINITY,
+        None,
+        &MinimaxContext {
+            model: model,
+            maximizing_player: 0,
+            minimizing_player: 1,
+        },
+    );
+
+    let hero_direction: Direction = hero_mm_result.principal_variation.unwrap_or(Direction::Up);
+
+    let (row_offset, col_offset) = hero_direction.value();
 
     return Move {
         row_offset: row_offset,

@@ -41,22 +41,23 @@
 
 
 
-// fn main() {
+fn main() {
 
+    println!("Hiya");
 
-//     println!("INNER START");
-//     let start = Instant::now();
+    // println!("INNER START");
+    // let start = Instant::now();
 
     
-//     let num_threads = 4;
-//     (0..num_threads)
-//         .into_par_iter() // Parallel iterator
-//         .for_each(|_| run_sims()); // Call simulate() for each iteration
+    // let num_threads = 4;
+    // (0..num_threads)
+    //     .into_par_iter() // Parallel iterator
+    //     .for_each(|_| run_sims()); // Call simulate() for each iteration
 
-//     let duration = start.elapsed();
-//     println!("OUTER DURATION: {:?}", duration);
+    // let duration = start.elapsed();
+    // println!("OUTER DURATION: {:?}", duration);
 
-// }
+}
 // fn run_sims() {
 
     

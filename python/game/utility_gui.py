@@ -1,4 +1,6 @@
+from typing import Optional
 from game.tron import Direction
+from ai.minimax import MinimaxDebugState
 
 import pygame
 from pygame.locals import *
@@ -24,6 +26,7 @@ COLORS = [BLUE, PURPLE, RED, BLACK]
 
 gui_initialized = False
 
+
 def init_utility_gui(game_dimension):
     global screen_factor, screen, clock
     screen_factor = LENGTH / game_dimension
@@ -32,7 +35,7 @@ def init_utility_gui(game_dimension):
     clock = pygame.time.Clock()
 
 
-def show_game_state(game):
+def show_game_state(game, minimax_debug_state: Optional[MinimaxDebugState] = None):
     global gui_initialized
 
     if not gui_initialized:
@@ -48,11 +51,14 @@ def show_game_state(game):
                     x, y = col * screen_factor, row * screen_factor
                     screen.fill(WALLS, pygame.Rect(x, y, screen_factor, screen_factor))
 
-    for (i, player) in enumerate(game.players):
+    for i, player in enumerate(game.players):
 
         color = GREEN if i == 0 else RED
         headx, heady = player.col * screen_factor, player.row * screen_factor
         screen.fill(color, pygame.Rect(headx, heady, screen_factor, screen_factor))
+
+    if minimax_debug_state is not None:
+        show_minimax_debug_info(minimax_debug_state)
 
     pygame.event.pump()
     pygame.display.flip()
@@ -77,3 +83,40 @@ def show_game_state(game):
                     return Direction.RIGHT
 
 
+def show_minimax_debug_info(minimax_debug_state: MinimaxDebugState):
+    font = pygame.font.Font(None, 36)  # 'None' uses the default font; size is 36
+
+    # Render the text
+    text = font.render(
+        f"Maximizing Player?  {minimax_debug_state.is_maximizing_player}",
+        True,
+        WHITE,
+    )  # True enables anti-aliasing
+    # Get the rectangle for positioning
+    text_rect = text.get_rect(center=(400, 80))  # Centered at (400, 300)
+    # Draw the text
+    screen.blit(text, text_rect)
+
+    # Render the text
+    text = font.render(
+        f"Maximizing Player Move:  {minimax_debug_state.maximizing_player_move}",
+        True,
+        WHITE,
+    )  # True enables anti-aliasing
+    # Get the rectangle for positioning
+    text_rect = text.get_rect(center=(400, 110))  # Centered at (400, 300)
+    # Draw the text
+    screen.blit(text, text_rect)
+
+    # Render the text
+    text = font.render(
+        f"Depth:  {minimax_debug_state.depth}, Alpha:  {minimax_debug_state.alpha}, Beta:  {minimax_debug_state.beta}",
+        True,
+        WHITE,
+    )  # True enables anti-aliasing
+
+    # Get the rectangle for positioning
+    text_rect = text.get_rect(center=(400, 50))  # Centered at (400, 300)
+
+    # Draw the text
+    screen.blit(text, text_rect)

@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package tron;
+
+message GridRow {
+  repeated bool cells = 1; // Each row is a sequence of booleans.
+}
+
+message Player {
+  int32 row = 1;
+  int32 col = 2;
+  bool can_move = 3;
+}
+
+
+message GameState {
+
+  repeated GridRow grid = 1;
+  repeated Player players = 2;
+}
+
+message Game {
+    repeated GameState game_states = 1;
+}
+
+message Games {
+    repeated Game games = 1;
+}

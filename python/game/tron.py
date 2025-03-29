@@ -1,7 +1,9 @@
+import sys
 import random
 from enum import Enum, StrEnum, auto
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Optional
 from functools import lru_cache
 
 import numpy as np
@@ -25,14 +27,12 @@ class Direction(Enum):
     def get_random_direction() -> "Direction":
         return random.choice(list(Direction))
 
-
+@dataclass(frozen=True)
 class Player:
 
-    def __init__(self, row: int, col: int, direction: Direction, can_move: bool):
-        self.row = row
-        self.col = col
-        self.direction = direction
-        self.can_move = can_move
+    row: int
+    col: int
+    can_move: bool
 
     def __eq__(self, other):
         if not isinstance(other, Player):
@@ -40,51 +40,47 @@ class Player:
         return (
             self.row == other.row
             and self.col == other.col
-            and self.direction == other.direction
             and self.can_move == other.can_move
         )
 
     def __hash__(self):
         return hash(
-            (hash(self.row), hash(self.col), hash(self.direction), hash(self.can_move))
+            (hash(self.row), hash(self.col), hash(self.can_move))
         )
 
 
-class GameStatus(Enum):
+@dataclass(frozen=True)
+class GameState:
+    grid: np.ndarray[bool]
+    players: tuple[Player]
 
-    IN_PROGRESS = auto()
-    TIE = auto()
-    P1_WIN = auto()
-    P2_WIN = auto()
-    P3_WIN = auto()
-    P4_WIN = auto()
+    def __str__(self):
 
-    # TODO: Maybe this should be an instance method
-    @staticmethod
-    def index_of_winner(status: "GameStatus"):
-        if status == GameStatus.P1_WIN:
-            return 0
-        if status == GameStatus.P2_WIN:
-            return 1
-        else:
-            raise NotImplementedError()
+        repr_str = ""
 
+        for row in self.grid.tolist():
+            repr_str += str(row)
+            repr_str += "\n"
 
-@dataclass
-class DirectionUpdate:
-    direction: Direction
-    player_index: int
+        repr_str += "\n"
 
+        for i, player in enumerate(self.players):
+            repr_str += f"Player {i + 1}: ({player.row}, {player.col})"
+
+        return repr_str
+    
     def __eq__(self, other):
-        if not isinstance(other, DirectionUpdate):
+        if not isinstance(other, GameState):
             return False
         return (
-            self.direction == other.direction
-            and self.player_index == other.player_index
+            np.array_equal(self.grid, other.grid)
+            and self.players == other.players
         )
 
     def __hash__(self):
-        return hash((self.direction, self.player_index))
+
+        return hash((self.grid.tobytes(), self.players))
+
 
 
 @dataclass
@@ -94,31 +90,109 @@ class DefaultStart:
     direction: Direction
 
 
-class Tron:
+class GameStatus(Enum):
 
-    TWO_PLAYER_DEFAULT_STARTS = [
-        DefaultStart(row_fraction=0.5, col_fraction=0.25, direction=Direction.RIGHT),
-        DefaultStart(row_fraction=0.5, col_fraction=0.75, direction=Direction.LEFT),
-    ]
-    # TODO:
-    # THREE_PLAYER_DEFAULT_STARTS = [...]
-    # FOUR_PLAYER_DEFAULT_STARTS = [...]
+    IN_PROGRESS = auto()
+    TIE = auto()
+    WINNER = auto()
+
+@dataclass
+class StatusInfo:
+    status: GameStatus
+    winner_index: Optional[int] = None
 
 
-    # TODO: Change to @classmethod, "with_random_starts" or something like that
-    def __init__(self, num_players=2, num_rows=10, num_cols=10, random_starts=False):
-        """
-        Init game without pre-initialized players.
-        """
+def get_status(game: GameState) -> StatusInfo:
 
-        self.grid = np.zeros((num_rows, num_cols), dtype=bool)
-        self.status = GameStatus.IN_PROGRESS
+    num_players_can_move = 0
+    winner_index = None
 
-        # Becomes self.players Tuple after Player objects are appended
-        player_list = []
+    for i, player in enumerate(game.players):
+        if player.can_move:
+            num_players_can_move += 1
+            winner_index = i
 
-        starts = set()
-        if random_starts:
+    if num_players_can_move == 0:
+        return StatusInfo(GameStatus.TIE)
+    elif num_players_can_move == 1:
+        return StatusInfo(GameStatus.WINNER, winner_index)
+    else:
+        return StatusInfo(GameStatus.IN_PROGRESS)
+    
+def in_bounds(grid: np.ndarray, row: int, col: int):
+    return 0 <= row < grid.shape[0] and 0 <= col < grid.shape[1]
+
+
+def get_possible_directions(game: GameState, player_index):
+    available_directions = []
+    player = game.players[player_index]
+
+    for dir in Direction:
+
+        dr, dc = dir.value
+        new_row, new_col = player.row + dr, player.col + dc
+
+        if (
+            in_bounds(game.grid, new_row, new_col)
+            and not game.grid[new_row, new_col]
+        ):
+            available_directions.append(dir)
+
+    return available_directions
+
+
+
+
+def from_players(players: tuple[Player], num_rows=10, num_cols=10) -> GameState:
+    """
+    Init game with pre-initialized players.
+    """
+
+    grid = np.zeros((num_rows, num_cols), dtype=bool)
+
+    assert isinstance(players, tuple)
+
+    for i in range(len(players)):
+
+        p1 = players[i]
+
+        assert isinstance(p1, Player)
+        assert GameState.in_bounds(grid, p1.row, p1.col)
+        assert p1.can_move
+
+        for j in range(i + 1, len(players)):
+            p2 = players[j]
+            assert not (p1.row == p2.row and p1.col == p2.col)
+
+    for player in players:
+        grid[player.row, player.col] = True
+
+    status = GameStatus.IN_PROGRESS
+
+    return GameState(grid, players)
+
+def new_game(
+    num_players: int = 2,
+    num_rows: int = 10,
+    num_cols: int = 10,
+    random_starts: bool = False,
+    neutral_starts: bool = False,
+) -> GameState:
+    """
+    Init game without pre-initialized players.
+    """
+
+    grid = np.zeros((num_rows, num_cols), dtype=bool)
+
+    # Becomes self.players Tuple after Player objects are appended
+    player_list = []
+
+    starts = set()
+
+    if random_starts:
+
+
+        if not neutral_starts:
             i = 0
             while i < num_players:
                 random_start = (
@@ -131,192 +205,193 @@ class Tron:
                         Player(
                             random_start[0],
                             random_start[1],
-                            direction=Direction.get_random_direction(),
                             can_move=True,
                         )
                     )
                     i += 1
+        # Neutral start (symmetric over horizontal, vertical, or diagonal axis)
         else:
-
-            if num_players == 2:
-                default_starts = Tron.TWO_PLAYER_DEFAULT_STARTS
-            else:
+            if num_players > 2:
                 raise NotImplementedError()
+            
+            rand_row = random.randrange(1, num_rows - 1)
+            rand_col = random.randrange(1, num_cols - 1)
 
-            for i in range(num_players):
-
-                player_list.append(
-                    Player(
-                        row=int(default_starts[i].row_fraction * num_rows),
-                        col=int(default_starts[i].col_fraction * num_cols),
-                        direction=default_starts[i].direction,
-                        can_move=True,
-                    )
+            player_list.append(
+                Player(
+                    rand_row,
+                    rand_col,
+                    can_move=True,
                 )
-
-        self.players = tuple(player_list)
-
-        for player in self.players:
-            self.grid[player.row, player.col] = True
-
-    
-    # TODO: Change to @classmethod, "from players" or something like that
-    # def __init__(self, players: tuple[Player], num_rows=10, num_cols=10):
-    #     """
-    #     Init game with pre-initialized players.
-    #     """
-
-    #     self.grid = np.zeros((num_rows, num_cols), dtype=bool)
-    #     self.status = GameStatus.IN_PROGRESS
-
-    #     assert isinstance(players, tuple)
-
-    #     for i in range(len(players)):
-
-    #         p1 = players[i]
-
-    #         assert isinstance(p1, Player)
-    #         assert Tron.in_bounds(self.grid, p1.row, p1.col)
-
-    #         for j in range(i+1, len(players)):
-    #             p2 = players[j]
-    #             assert not (p1.row == p2.row and p1.col == p2.col)
-
-    #     self.players = players
-
-    #     for player in self.players:
-    #         self.grid[player.row, player.col] = True
-
-    def __eq__(self, other):
-        if not isinstance(other, Tron):
-            return False
-        return (
-            np.array_equal(self.grid, other.grid)
-            and self.status == other.status
-            and self.players == other.players
-        )
-
-    def __hash__(self):
-
-        return hash((self.grid.tobytes(), self.status, self.players))
-
-    @lru_cache(maxsize=None)
-    def lru_cache_next(game: "Tron", direction_updates: DirectionUpdate):
-        return Tron.next(game, direction_updates)
-
-    @staticmethod
-    def next(game: "Tron", direction_updates: tuple[DirectionUpdate]) -> "Tron":
-
-        assert game.status == GameStatus.IN_PROGRESS
-        assert isinstance(direction_updates, tuple)
-
-        # TODO: Make this quicker and avoid deepcopy somehow
-        next_game_state = deepcopy(game)
-
-        # NOTE: It would be nice to not have to modify any Player objects
-        # Instead, create the new objects with the updated direction
-        # NOTE: Should players even have a direction?
-        for dir_update in direction_updates:
-            next_game_state.players[dir_update.player_index].direction = (
-                dir_update.direction
             )
 
-        for player in next_game_state.players:
-            if player.can_move:
-                dr, dc = player.direction.value
-                new_row, new_col = player.row + dr, player.col + dc
-                if (
-                    Tron.in_bounds(next_game_state.grid, new_row, new_col)
-                    and not next_game_state.grid[new_row, new_col]
-                ):
-                    player.row = new_row
-                    player.col = new_col
+            c_row = (num_rows - 1) / 2
+            c_col = (num_cols - 1) / 2
+
+            def rotate_pos(row, col, angle):
+
+                if angle == 0:
+                    return row, col
+                elif angle == 90:  # 90 degrees clockwise
+                    row_new = int(c_col - (col - c_col))
+                    col_new = int(row - c_row + c_row)
+                elif angle == 180:  # 180 degrees
+                    row_new = int(2 * c_row - row)
+                    col_new = int(2 * c_col - col)
+                elif angle == 270:  # 270 degrees clockwise
+                    row_new = int(col - c_col + c_row)
+                    col_new = int(c_row - (row - c_row))
                 else:
-                    player.can_move = False
+                    raise ValueError("Angle must be 90, 180, or 270 degrees")
+                return (row_new, col_new)
 
-        # Case where players attempt to occupy same square
-        for i in range(len(next_game_state.players)):
+            neutral_oppo_row = rand_row
+            neutral_oppo_col = rand_col
 
-            pi = next_game_state.players[i]
+            do_flip = random.random() > 0.5
 
-            if pi.can_move:
-                for j in range(i + 1, len(next_game_state.players)):
-                    pj = next_game_state.players[j]
-
-                    if pj.can_move:
-                        if pi.row == pj.row and pi.col == pj.col:
-                            pi.can_move = False
-                            pj.can_move = False
-
-            next_game_state.grid[pi.row, pi.col] = True
-
-        next_game_state.status = Tron.get_status(next_game_state.players)
-
-        return next_game_state
-
-    @staticmethod
-    def in_bounds(grid: np.ndarray, row: int, col: int):
-        return 0 <= row < grid.shape[0] and 0 <= col < grid.shape[1]
-
-    @staticmethod
-    def get_status(players: list[Player]):
-
-        num_players_can_move = 0
-
-        for player in players:
-            if player.can_move:
-                num_players_can_move += 1
-
-        if num_players_can_move > 1:
-            return GameStatus.IN_PROGRESS
-        elif num_players_can_move == 0:
-            return GameStatus.TIE
-
-        elif num_players_can_move == 1:
-            # Assuming 2 players only
-            if players[0].can_move:
-                return GameStatus.P1_WIN
-            elif players[1].can_move:
-                return GameStatus.P2_WIN
+            if do_flip:
+                neutral_oppo_col = num_cols - rand_col
+                neutral_oppo_row, neutral_oppo_col = rotate_pos(neutral_oppo_row, neutral_oppo_col, random.choice([0, 90, 180, 270]))
             else:
-                raise NotImplementedError()
+                neutral_oppo_row, neutral_oppo_col = rotate_pos(neutral_oppo_row, neutral_oppo_col, random.choice([90, 180, 270]))
 
-    @staticmethod
-    def get_possible_directions(game: "Tron", player_index):
-        available_directions = []
-        player = game.players[player_index]
+            assert not (neutral_oppo_row == rand_row and neutral_oppo_col == rand_col)
 
-        for dir in Direction:
+            player_list.append(
+                Player(
+                    neutral_oppo_row,
+                    neutral_oppo_col,
+                    can_move=True,
+                )
+            )
 
-            dr, dc = dir.value
+        
+    else:
+
+        if num_players == 2:
+            default_starts = GameState.TWO_PLAYER_DEFAULT_STARTS
+        else:
+            raise NotImplementedError()
+
+        for i in range(num_players):
+
+            player_list.append(
+                Player(
+                    row=int(default_starts[i].row_fraction * num_rows),
+                    col=int(default_starts[i].col_fraction * num_cols),
+                    can_move=True,
+                )
+            )
+
+    players = tuple(player_list)
+
+    for player in players:
+        grid[player.row, player.col] = True
+
+    return GameState(grid, players)
+
+
+# TODO - should this be somewhere else?
+# 10 mil in da cache
+# @lru_cache(maxsize=int(1e7))
+# def lru_cache_next(game: "GameState", direction_updates: DirectionUpdate):
+#     return GameState.next(game, direction_updates)
+
+
+@staticmethod
+def next(game: GameState, directions: tuple[Direction]) -> GameState:
+
+    assert len(directions) == len(game.players)
+
+    next_grid = game.grid.copy()
+
+    next_players = []
+    for player, direction in zip(game.players, directions):
+        next_row, next_col, next_can_move = player.row, player.col, player.can_move
+
+        if player.can_move:
+            dr, dc = direction.value
             new_row, new_col = player.row + dr, player.col + dc
-
             if (
-                Tron.in_bounds(game.grid, new_row, new_col)
+                in_bounds(game.grid, new_row, new_col)
                 and not game.grid[new_row, new_col]
             ):
-                available_directions.append(dir)
+                next_row, next_col = new_row, new_col
+            else:
+                next_can_move = False
 
-        return available_directions
+        next_players.append(Player(next_row, next_col, next_can_move))
 
-    # TODO: Where should this live?
-    # """
-    # Get a JSON string representation of the current game state
-    # """
+    # Update grid and handle case where 2 or more players try to occupy the same square
+    for i in range(len(next_players)):
 
-    # def to_json(self) -> str:
+        pi: Player = next_players[i]
+        next_grid[pi.row, pi.col] = True
 
-    #     player_list = []
+        if pi.can_move:
+            for j in range(i + 1, len(next_players)):
+                pj: Player = next_players[j]
 
-    #     for i, player in enumerate(self.players):
-    #         player_list.append(
-    #             {
-    #                 "player_num": i + 1,
-    #                 "direction": player.direction.value,
-    #                 "head_pos": player.head,
-    #             }
-    #         )
+                if pj.can_move:
+                    if pi.row == pj.row and pi.col == pj.col:
+                        next_players[i] = Player(pi.row, pi.col, can_move=False)
+                        next_players[j] = Player(pj.row, pj.col, can_move=False)
 
-    #     json_dict = {"grid": self.grid, "players": player_list}
+    return GameState(next_grid, tuple(next_players))
 
-    #     return json.dumps(json_dict)
+
+# @staticmethod
+# def old_next(game: "GameState", direction_updates: tuple[DirectionUpdate]) -> "GameState":
+
+#     assert game.status == GameStatus.IN_PROGRESS
+#     assert isinstance(direction_updates, tuple)
+
+#     # TODO: Make this quicker and avoid deepcopy somehow
+#     next_game_state = deepcopy(game)
+
+#     # NOTE: It would be nice to not have to modify any Player objects
+#     # Instead, create the new objects with the updated direction
+#     # NOTE: Should players even have a direction?
+#     for dir_update in direction_updates:
+#         next_game_state.players[dir_update.player_index].direction = (
+#             dir_update.direction
+#         )
+
+#     for player in next_game_state.players:
+#         if player.can_move:
+#             dr, dc = player.direction.value
+#             new_row, new_col = player.row + dr, player.col + dc
+#             if (
+#                 GameState.in_bounds(next_game_state.grid, new_row, new_col)
+#                 and not next_game_state.grid[new_row, new_col]
+#             ):
+#                 player.row = new_row
+#                 player.col = new_col
+#             else:
+#                 player.can_move = False
+
+#     # Case where players attempt to occupy same square
+#     for i in range(len(next_game_state.players)):
+
+#         pi = next_game_state.players[i]
+
+#         if pi.can_move:
+#             for j in range(i + 1, len(next_game_state.players)):
+#                 pj = next_game_state.players[j]
+
+#                 if pj.can_move:
+#                     if pi.row == pj.row and pi.col == pj.col:
+#                         pi.can_move = False
+#                         pj.can_move = False
+
+#         next_game_state.grid[pi.row, pi.col] = True
+
+#     next_game_state.status = GameState.get_status(next_game_state.players)
+
+#     return next_game_state
+
+
+
+
+

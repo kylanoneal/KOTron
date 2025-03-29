@@ -1,13 +1,19 @@
 import numpy as np
 import sys
-from typing import Union
+from typing import Optional
 from cachetools import LRUCache, cached
+from dataclasses import dataclass
 
-from game.tron import Tron, GameStatus, DirectionUpdate, Direction
-from AI.tron_model import TronModelAbstract
+from game import tron
+from game.tron import GameState, GameStatus, Direction
+
+from ai.tron_model import TronModelAbstract
+
 
 # TODO: Change args to player pos, opponent pos, direction?
-def heuristic_towards_opponent(game: Tron, hero_index: int, opponent_index: int, direction: Direction):
+def heuristic_towards_opponent(
+    game: GameState, hero_index: int, opponent_index: int, direction: Direction
+):
     direction.value[0]
 
     opponent_right = game.players[opponent_index].col > game.players[hero_index].col
@@ -17,7 +23,7 @@ def heuristic_towards_opponent(game: Tron, hero_index: int, opponent_index: int,
         return 1.0
     elif opponent_down and direction == Direction.DOWN:
         return 1.0
-    
+
     opponent_left = game.players[opponent_index].col < game.players[hero_index].col
     opponent_up = game.players[opponent_index].row < game.players[hero_index].row
 
@@ -30,8 +36,9 @@ def heuristic_towards_opponent(game: Tron, hero_index: int, opponent_index: int,
 
 
 # TODO: This should probably be in different spot
-# Initialize an LRU cache with a maximum size
-cache = LRUCache(maxsize=sys.maxsize)
+# Initialize an LRU cache with 20 mil max size
+cache = LRUCache(maxsize=20000000)
+
 
 
 @cached(cache)
@@ -39,365 +46,324 @@ def lru_eval(model: TronModelAbstract, game, player_index):
     return model.run_inference([game], player_index)[0]
 
 
+@dataclass
+class MinimaxDebugState:
+    game_state: GameState
+    depth: int
+    is_maximizing_player: bool
+    alpha: int
+    beta: int
+    maximizing_player_move: Direction
+
+
+# For debugging minimax
+# minimax_stack = []
+
+
+@dataclass
+class MinimaxResult:
+    evaluation: float
+    principal_variation: Optional[Direction] = None
+
+
+@dataclass
+class MinimaxContext:
+    model: TronModelAbstract
+    maximizing_player: int
+    minimizing_player: int
+    debug_mode: bool = False
+
+
 def minimax_alpha_beta_eval_all(
-    model: TronModelAbstract,
-    game_state: Tron,
+    game_state: GameState,
     depth: int,
-    maximizing_player_index,
-    minimizing_player_index,
     is_maximizing_player: bool,
-    is_root: bool = False,
     alpha: float = float("-inf"),
     beta: float = float("inf"),
-    maximizing_player_move=None,
-) -> Union[float, DirectionUpdate]:
+    maximizing_player_move: Direction = None,
+    context: MinimaxContext = None,
+) -> MinimaxResult:
+    assert context is not None, "Context must be passed"
+    maximizing_player = context.maximizing_player
+    minimizing_player = context.minimizing_player
 
-    if game_state.status != GameStatus.IN_PROGRESS:
+    # if debug_mode:
+    #     raise NotImplementedError()
+    #     minimax_stack.append(
+    #         MinimaxDebugState(
+    #             game_state,
+    #             depth,
+    #             is_maximizing_player,
+    #             alpha,
+    #             beta,
+    #             maximizing_player_move,
+    #         )
+    #     )
 
-        if game_state.status == GameStatus.TIE:
-            return 0.0
-        else:
-            raise RuntimeError("Winning terminal state should never be reached here.")
-            if GameStatus.index_of_winner(game_state.status) == maximizing_player_index:
-                return float("inf")
-            else:
-                return float("-inf")
+    game_status = tron.get_status(game_state)
+
+    if game_status.status == GameStatus.TIE:
+        return MinimaxResult(0.0, None)
+    elif game_status.status == GameStatus.WINNER:
+        raise RuntimeError("Winning terminal state should never be reached here.")
+
 
     if depth == 0:
-        return lru_eval(model, game_state, maximizing_player_index)
+        return MinimaxResult(lru_eval(context.model, game_state, maximizing_player), None)
 
     if is_maximizing_player:
-        max_eval = float("-inf")
 
-        possible_directions = Tron.get_possible_directions(
-            game_state, maximizing_player_index
+        possible_directions = tron.get_possible_directions(
+            game_state, maximizing_player
         )
 
         # Handle no possible directions - maybe other player doesn't either
         if len(possible_directions) == 0:
 
-            # Nowhere to go, just return up
-            if is_root:
-                return DirectionUpdate(Direction.UP, maximizing_player_index)
-            opponent_possible_directions = Tron.get_possible_directions(
-                game_state, minimizing_player_index
+            opponent_possible_directions = tron.get_possible_directions(
+                game_state, minimizing_player
             )
 
             # This is a tie
             if len(opponent_possible_directions) == 0:
-                return 0.0
+                return MinimaxResult(0.0, None)
             # Guaranteed loss for maximizing player, eval is relative to depth.
             # Losses at deeper depths will be preffered to those at shallower depths.
             # Encourages bot to stay alive because a human could easily not play optimally.
             else:
-                return -100.0 * depth
-            
+                return MinimaxResult(-100.0 * depth, None)
 
         # Heuristic sorting (descending order for maximizing player)
         sorted_directions = sorted(
             possible_directions,
             key=lambda dir: heuristic_towards_opponent(
-                game_state, maximizing_player_index, minimizing_player_index, dir
+                game_state, maximizing_player, minimizing_player, dir
             ),
-            reverse=True
+            reverse=True,
         )
 
+        max_eval = float("-inf")
         for direction in sorted_directions:
-
-            eval = minimax_alpha_beta_eval_all(
-                model,
+            mm_result: MinimaxResult = minimax_alpha_beta_eval_all(
                 game_state,
                 depth,
-                maximizing_player_index=maximizing_player_index,
-                minimizing_player_index=minimizing_player_index,
                 is_maximizing_player=False,
                 alpha=alpha,
                 beta=beta,
                 maximizing_player_move=direction,
+                context=context,
             )
 
-            if eval > max_eval:
-                max_eval = eval
+            if mm_result.evaluation > max_eval:
+                max_eval = mm_result.evaluation
                 best_dir = direction
 
-            alpha = max(alpha, eval)
+            alpha = max(alpha, mm_result.evaluation)
             if beta <= alpha:
                 break
 
-        return (
-            max_eval if not is_root else DirectionUpdate(best_dir, maximizing_player_index)
-        )
+        return MinimaxResult(max_eval, best_dir)
     else:
-        min_eval = float("inf")
-
-        possible_directions = Tron.get_possible_directions(
-            game_state, minimizing_player_index
+        possible_directions = tron.get_possible_directions(
+            game_state, minimizing_player
         )
 
         # Guaranteed win for maximizing player, eval is relative to depth
         if len(possible_directions) == 0:
-            return 100.0 * depth
+            return MinimaxResult(100.0 * depth, None)
 
 
-        child_states = [
-            Tron.lru_cache_next(
-                game_state,
-                direction_updates=(
-                    DirectionUpdate(maximizing_player_move, maximizing_player_index),
-                    DirectionUpdate(direction, minimizing_player_index),
-                ),
-            )
-            for direction in possible_directions
-        ]
 
-        # Sort child states by cached eval
-        # Ascending oder (for minimizing player, lowest evaluations are most promising)
-        sorted_child_states = sorted(
-            child_states,
-            key=lambda child_state: lru_eval(
-                model, child_state, maximizing_player_index
-            ),
-        )
-
-        sorted_child_states = child_states
-
-        for child_state in sorted_child_states:
-            eval = minimax_alpha_beta_eval_all(
-                model,
-                child_state,
-                depth - 1,
-                maximizing_player_index=maximizing_player_index,
-                minimizing_player_index=minimizing_player_index,
-                is_maximizing_player=True,
-                alpha=alpha,
-                beta=beta,
-            )
-            min_eval = min(min_eval, eval)
-            beta = min(beta, eval)
-
-            if beta <= alpha:
-                break
-
-        return min_eval
-
-
-# TODO: Fix not handling ties correctly
-def minimax_alpha_beta(
-    model: TronModelAbstract,
-    game_state: Tron,
-    depth: int,
-    alpha: float,
-    beta: float,
-    is_maximizing_player: bool,
-    maximizing_player_index,
-    minimizing_player_index,
-    maximizing_player_move=None,
-) -> float:
-
-    if game_state.status != GameStatus.IN_PROGRESS:
-
-        if game_state.status == GameStatus.TIE:
-            return 0.0
-        else:
-            raise RuntimeError("Winning terminal state should never be reached here.")
-            if GameStatus.index_of_winner(game_state.status) == maximizing_player_index:
-                return float("inf")
-            else:
-                return float("-inf")
-
-    if depth == 0:
-        return model.run_inference([game_state], maximizing_player_index)[0]
-
-    if is_maximizing_player:
-
-        max_eval = float("-inf")
-
-        possible_directions = Tron.get_possible_directions(
-            game_state, maximizing_player_index
-        )
-
-        # Handle no possible directions - maybe other player doesn't either
-        if len(possible_directions) == 0:
-            opponent_possible_directions = Tron.get_possible_directions(
-                game_state, minimizing_player_index
-            )
-
-            # This is a tie
-            if len(opponent_possible_directions) == 0:
-                return 0.0
-            # Loss
-            else:
-                return float("-inf")
+        child_states = []
 
         for direction in possible_directions:
 
-            eval = minimax_alpha_beta(
-                model,
+            directions = [None, None]
+            directions[maximizing_player] = maximizing_player_move
+            directions[minimizing_player] = direction
+
+            child_states.append(tron.next(
                 game_state,
-                depth,
-                alpha,
-                beta,
-                is_maximizing_player=False,
-                maximizing_player_index=maximizing_player_index,
-                minimizing_player_index=minimizing_player_index,
-                maximizing_player_move=direction,
+                directions,
+            ))
+
+
+        # # Sort child states by eval if cached, else use heuristic
+        def sort_possibilities(dir_state_tup: tuple[Direction, GameState]):
+
+            direction, child_state = dir_state_tup
+
+            arg_tup = (context.model, child_state, maximizing_player)
+
+            # Prioritize previously evaluated positions over the heuristic
+            if arg_tup in cache:
+                # By subtracting 100 we guarantee previously evaluated positions are considered first
+                return lru_eval(*arg_tup) - 100.0
+            else:
+                # From perspective of minimizing player
+                # Multiply by -1 because lower = better
+                return -1 * heuristic_towards_opponent(
+                    child_state,
+                    hero_index=minimizing_player,
+                    opponent_index=maximizing_player,
+                    direction=direction,
+                )
+
+        # Ascending order (for minimizing player, lowest evaluations are most promising)
+        sorted_possible_directions, sorted_child_states = zip(
+            *sorted(zip(possible_directions, child_states), key=sort_possibilities)
+        )
+
+        # sorted_child_states = sorted(
+        #     child_states,
+        #     key=lambda child_state: lru_eval(
+        #         model, child_state, maximizing_player_index
+        #     ),
+        # )
+
+        min_eval = float("inf")
+
+        for direction, child_state in zip(sorted_possible_directions, sorted_child_states):
+            mm_result: MinimaxResult = minimax_alpha_beta_eval_all(
+                child_state,
+                depth - 1,
+                is_maximizing_player=True,
+                alpha=alpha,
+                beta=beta,
+                context=context,
             )
-            max_eval = max(max_eval, eval)
-            alpha = max(alpha, eval)
+
+            if mm_result.evaluation < min_eval:
+                min_eval = mm_result.evaluation
+                best_dir = direction
+
+            beta = min(beta, mm_result.evaluation)
+
             if beta <= alpha:
                 break
 
-        return max_eval
-    else:
-        min_eval = float("inf")
-        for direction in Tron.get_possible_directions(
-            game_state, minimizing_player_index
-        ):
-            child_state = Tron.lru_cache_next(
-                game_state,
-                direction_updates=(
-                    DirectionUpdate(maximizing_player_move, maximizing_player_index),
-                    DirectionUpdate(direction, minimizing_player_index),
-                ),
-            )
-            eval = minimax_alpha_beta(
-                model,
-                child_state,
-                depth - 1,
-                alpha,
-                beta,
-                is_maximizing_player=True,
-                maximizing_player_index=maximizing_player_index,
-                minimizing_player_index=minimizing_player_index,
-            )
-            min_eval = min(min_eval, eval)
-            beta = min(beta, eval)
-
-            if beta <= alpha:
-                break
-
-        return min_eval
+        return MinimaxResult(min_eval, best_dir)
 
 
-# TODO: Fix not handling ties correctly
-def basic_minimax(
-    model: TronModelAbstract,
-    game_state: Tron,
-    depth,
-    is_maximizing_player: bool,
-    maximizing_player_index,
-    minimizing_player_index,
-    maximizing_player_move=None,
-) -> float:
+# # TODO: Fix not handling ties correctly
+# def basic_minimax(
+#     model: TronModelAbstract,
+#     game_state: GameState,
+#     depth,
+#     is_maximizing_player: bool,
+#     maximizing_player_index,
+#     minimizing_player_index,
+#     maximizing_player_move=None,
+# ) -> float:
 
-    if game_state.status != GameStatus.IN_PROGRESS:
+#     if game_state.status != GameStatus.IN_PROGRESS:
 
-        if game_state.status == GameStatus.TIE:
-            return 0.0
-        else:
-            if GameStatus.index_of_winner(game_state.status) == maximizing_player_index:
-                return float("inf")
-            else:
-                return float("-inf")
+#         if game_state.status == GameStatus.TIE:
+#             return 0.0
+#         else:
+#             if GameStatus.index_of_winner(game_state.status) == maximizing_player_index:
+#                 return float("inf")
+#             else:
+#                 return float("-inf")
 
-    if depth == 0:
-        return model.run_inference([game_state], maximizing_player_index)[0]
+#     if depth == 0:
+#         return model.run_inference([game_state], maximizing_player_index)[0]
 
-    if is_maximizing_player:
-        max_eval = -float("inf")
-        for direction in Tron.get_possible_directions(
-            game_state, maximizing_player_index
-        ):
-            eval = basic_minimax(
-                model,
-                game_state,
-                depth,
-                is_maximizing_player=False,
-                maximizing_player_index=maximizing_player_index,
-                minimizing_player_index=minimizing_player_index,
-                maximizing_player_move=direction,
-            )
-            max_eval = max(max_eval, eval)
-        return max_eval
-    else:
-        min_eval = float("inf")
-        for direction in Tron.get_possible_directions(
-            game_state, minimizing_player_index
-        ):
-            child_state = Tron.next(
-                game_state,
-                direction_updates=(
-                    DirectionUpdate(maximizing_player_move, maximizing_player_index),
-                    DirectionUpdate(direction, minimizing_player_index),
-                ),
-            )
-            eval = basic_minimax(
-                model,
-                child_state,
-                depth - 1,
-                is_maximizing_player=True,
-                maximizing_player_index=maximizing_player_index,
-                minimizing_player_index=minimizing_player_index,
-            )
-            min_eval = min(min_eval, eval)
-        return min_eval
+#     if is_maximizing_player:
+#         max_eval = -float("inf")
+#         for direction in GameState.get_possible_directions(
+#             game_state, maximizing_player_index
+#         ):
+#             eval = basic_minimax(
+#                 model,
+#                 game_state,
+#                 depth,
+#                 is_maximizing_player=False,
+#                 maximizing_player_index=maximizing_player_index,
+#                 minimizing_player_index=minimizing_player_index,
+#                 maximizing_player_move=direction,
+#             )
+#             max_eval = max(max_eval, eval)
+#         return max_eval
+#     else:
+#         min_eval = float("inf")
+#         for direction in tron.get_possible_directions(
+#             game_state, minimizing_player_index
+#         ):
+#             child_state = tron.next(
+#                 game_state,
+#                 direction_updates=(
+#                     DirectionUpdate(maximizing_player_move, maximizing_player_index),
+#                     DirectionUpdate(direction, minimizing_player_index),
+#                 ),
+#             )
+#             eval = basic_minimax(
+#                 model,
+#                 child_state,
+#                 depth - 1,
+#                 is_maximizing_player=True,
+#                 maximizing_player_index=maximizing_player_index,
+#                 minimizing_player_index=minimizing_player_index,
+#             )
+#             min_eval = min(min_eval, eval)
+#         return min_eval
 
 
-def minimax_dumb(
-    game_state: Tron,
-    depth,
-    is_maximizing_player: bool,
-    maximizing_player_index,
-    minimizing_player_index,
-    maximizing_player_move=None,
-) -> float:
+# def minimax_dumb(
+#     game_state: GameState,
+#     depth,
+#     is_maximizing_player: bool,
+#     maximizing_player_index,
+#     minimizing_player_index,
+#     maximizing_player_move=None,
+# ) -> float:
 
-    if game_state.status != GameStatus.IN_PROGRESS:
+#     if game_state.status != GameStatus.IN_PROGRESS:
 
-        if game_state.status == GameStatus.TIE:
-            return 0.0
-        else:
-            if GameStatus.index_of_winner(game_state.status) == maximizing_player_index:
-                return float("inf")
-            else:
-                return float("-inf")
+#         if game_state.status == GameStatus.TIE:
+#             return 0.0
+#         else:
+#             if GameStatus.index_of_winner(game_state.status) == maximizing_player_index:
+#                 return float("inf")
+#             else:
+#                 return float("-inf")
 
-    if depth == 0:
-        return 0
+#     if depth == 0:
+#         return 0
 
-    if is_maximizing_player:
-        max_eval = -float("inf")
-        for direction in Tron.get_possible_directions(
-            game_state, maximizing_player_index
-        ):
-            eval = minimax_dumb(
-                game_state,
-                depth,
-                is_maximizing_player=False,
-                maximizing_player_index=maximizing_player_index,
-                minimizing_player_index=minimizing_player_index,
-                maximizing_player_move=direction,
-            )
-            max_eval = max(max_eval, eval)
-        return max_eval
-    else:
-        min_eval = float("inf")
-        for direction in Tron.get_possible_directions(
-            game_state, minimizing_player_index
-        ):
-            child_state = Tron.next(
-                game_state,
-                direction_updates=(
-                    DirectionUpdate(maximizing_player_move, maximizing_player_index),
-                    DirectionUpdate(direction, minimizing_player_index),
-                ),
-            )
-            eval = minimax_dumb(
-                child_state,
-                depth - 1,
-                is_maximizing_player=True,
-                maximizing_player_index=maximizing_player_index,
-                minimizing_player_index=minimizing_player_index,
-            )
-            min_eval = min(min_eval, eval)
-        return min_eval
+#     if is_maximizing_player:
+#         max_eval = -float("inf")
+#         for direction in GameState.get_possible_directions(
+#             game_state, maximizing_player_index
+#         ):
+#             eval = minimax_dumb(
+#                 game_state,
+#                 depth,
+#                 is_maximizing_player=False,
+#                 maximizing_player_index=maximizing_player_index,
+#                 minimizing_player_index=minimizing_player_index,
+#                 maximizing_player_move=direction,
+#             )
+#             max_eval = max(max_eval, eval)
+#         return max_eval
+#     else:
+#         min_eval = float("inf")
+#         for direction in tron.get_possible_directions(
+#             game_state, minimizing_player_index
+#         ):
+#             child_state = tron.next(
+#                 game_state,
+#                 direction_updates=(
+#                     DirectionUpdate(maximizing_player_move, maximizing_player_index),
+#                     DirectionUpdate(direction, minimizing_player_index),
+#                 ),
+#             )
+#             eval = minimax_dumb(
+#                 child_state,
+#                 depth - 1,
+#                 is_maximizing_player=True,
+#                 maximizing_player_index=maximizing_player_index,
+#                 minimizing_player_index=minimizing_player_index,
+#             )
+#             min_eval = min(min_eval, eval)
+#         return min_eval

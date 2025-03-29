@@ -6,6 +6,7 @@ edition = "2021"
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+
 [dependencies]
 # ort = {version = "=2.0.0-rc.9", features = [ "cuda" ]}
 tract-onnx = "0.21.8"
@@ -15,6 +16,10 @@ strum_macros = "0.24"
 rand = "0.8"
 im = "15.0"
 getrandom = {version="0.2", features=["js"]}
+prost = "0.11"
+prost-types = "0.11"
+zmq = "0.10.0"
+
 
 # tch = {version="0.18.1", path="../../tch-rs"}
 
@@ -27,6 +32,9 @@ console_error_panic_hook = "0.1.7"
 
 # [dev-dependencies]
 # torch-sys = {version="0.18.1", path="../../tch-rs/torch-sys"}
+
+[build-dependencies]
+prost-build = "0.11"
 
 [profile.release]
 debug = true

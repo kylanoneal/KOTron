@@ -2,8 +2,10 @@ import torch
 import numpy as np
 from torch.utils.data import Dataset, DataLoader
 
-from game.tron import Tron, GameStatus
-from ai.algos import TronModelAbstract
+from game import tron
+from game.tron import GameState, GameStatus
+from ai.tron_model import TronModelAbstract
+
 
 # NOTE: Where does this belong?
 def get_weights_sum_of_squares(model):
@@ -16,29 +18,25 @@ def get_weights_sum_of_squares(model):
 
 
 def make_dataloader(
-    games_list: list[list[Tron]], model: TronModelAbstract, batch_size: int, shuffle: bool = True
+    game_data: list[list[GameState]],
+    model: TronModelAbstract,
+    batch_size: int,
+    shuffle: bool = True,
 ) -> DataLoader:
 
     dataset = []
 
-    for game_states in games_list:
+    for game_states in game_data:
 
-        last_game_state = game_states[-1]
+        terminal_status = tron.get_status(game_states[-1])
 
-        assert not last_game_state.status == GameStatus.IN_PROGRESS
+        assert not terminal_status.status == GameStatus.IN_PROGRESS
 
-        if not last_game_state.status == GameStatus.TIE:
-            if last_game_state.status == GameStatus.P1_WIN:
-                winning_player_index = 0
-            elif last_game_state.status == GameStatus.P2_WIN:
-                winning_player_index = 1
-            else:
-                raise NotImplementedError()
-        else:
-            winning_player_index = None
+        # TODO: "Think about how the first couple moves of the game should be represented"
 
         game_progs = [
-            turn_index / (len(game_states) - 1) for turn_index in range(len(game_states))
+            turn_index / (len(game_states) - 1)
+            for turn_index in range(len(game_states))
         ]
 
         # NOTE: Assumes 2 players
@@ -47,10 +45,10 @@ def make_dataloader(
             model_inputs = model.get_model_input(game_states, player_index)
 
             for game_prog, model_input in zip(game_progs, model_inputs):
-                if winning_player_index is not None:
+                if terminal_status.winner_index is not None:
                     eval = (
                         game_prog
-                        if winning_player_index == player_index
+                        if terminal_status.winner_index == player_index
                         else -game_prog
                     )
                 else:
@@ -90,7 +88,7 @@ def train_loop(
             # Forward pass, loss computation, backward pass, optimizer step, etc.
             outputs = model(inputs)
 
-            cum_epoch_magnitude += (torch.sum(torch.abs(outputs)).item() / len(outputs))
+            cum_epoch_magnitude += torch.sum(torch.abs(outputs)).item() / len(outputs)
 
             loss = criterion(outputs, labels)
 
@@ -101,7 +99,7 @@ def train_loop(
 
         epoch_avg_loss = cum_epoch_loss / len(train_dataloader)
         epoch_avg_magnitude = cum_epoch_magnitude / len(train_dataloader)
-        
+
         cum_loss += epoch_avg_loss
         cum_magnitude += epoch_avg_magnitude
         print(f"Epoch: {epoch + 1}, Avg. Train Loss: {epoch_avg_loss:.4f}")
@@ -109,4 +107,3 @@ def train_loop(
     average_loss = cum_loss / epochs
     average_magnitude = cum_magnitude / epochs
     return average_loss, average_magnitude
-
