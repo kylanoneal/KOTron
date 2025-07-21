@@ -22,6 +22,7 @@ def make_dataloader(
     model: TronModelAbstract,
     batch_size: int,
     shuffle: bool = True,
+    include_ties = True
 ) -> DataLoader:
 
     dataset = []
@@ -30,9 +31,13 @@ def make_dataloader(
 
         terminal_status = tron.get_status(game_states[-1])
 
+        if not include_ties and terminal_status.status == GameStatus.TIE:
+            continue
+
         assert not terminal_status.status == GameStatus.IN_PROGRESS
 
         # TODO: "Think about how the first couple moves of the game should be represented"
+        # TODO: Add rotation augmentation
 
         game_progs = [
             turn_index / (len(game_states) - 1)
@@ -44,7 +49,14 @@ def make_dataloader(
 
             model_inputs = model.get_model_input(game_states, player_index)
 
+            assert len(game_progs) == model_inputs.shape[0]
+
             for game_prog, model_input in zip(game_progs, model_inputs):
+
+                # if game_prog < 0.7:
+                #     print(f"Skipping game prog of : {game_prog}")
+                #     continue
+
                 if terminal_status.winner_index is not None:
                     eval = (
                         game_prog
@@ -83,6 +95,11 @@ def train_loop(
             # Move data to GPU if available
             inputs, labels = inputs.to(device), labels.to(device)
 
+            # if np.random.random() < 0.01:
+            #     print(f"Mean labels: {labels.mean()}")
+            #     print(f"mean Abs labels: {labels.abs().mean()}\n")
+
+
             optimizer.zero_grad()
 
             # Forward pass, loss computation, backward pass, optimizer step, etc.
@@ -102,7 +119,6 @@ def train_loop(
 
         cum_loss += epoch_avg_loss
         cum_magnitude += epoch_avg_magnitude
-        print(f"Epoch: {epoch + 1}, Avg. Train Loss: {epoch_avg_loss:.4f}")
 
     average_loss = cum_loss / epochs
     average_magnitude = cum_magnitude / epochs

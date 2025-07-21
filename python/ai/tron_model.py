@@ -13,12 +13,25 @@ class TronModelAbstract(ABC):
     ) -> torch.Tensor:
         pass
 
-    @abstractmethod
-    def run_inference(self, game_states: list[GameState], player_index: int) -> list[float]:
+    def run_inference(self, game_states: list[GameState], player_index: int) -> np.ndarray:
+
+        # NOTE: Maybe should have a way to set requries_grad = False for infernce time
+        model_input = self.get_model_input(game_states, player_index)
+
+        self.model.eval()
+
+        return self.model(model_input).detach().cpu().numpy()
+
+class RandomTronModel(TronModelAbstract):
+
+    def get_model_input(self, game_states, player_index):
         pass
+    
+    def run_inference(self, game_states, player_index):
+        return np.random.uniform(-1.0, 1.0, size=len(game_states))
+    
 
-
-class StandardTronModel(TronModelAbstract):
+class CnnTronModel(TronModelAbstract):
     def __init__(self, model, device):
 
         self.device = device
@@ -55,12 +68,104 @@ class StandardTronModel(TronModelAbstract):
         )
 
         return tensor_output
+    
 
-    def run_inference(self, game_states: list[GameState], player_index: int) -> np.ndarray:
+class OneHotTransformerTronModel(TronModelAbstract):
+    def __init__(self, model, device):
 
-        # NOTE: Maybe should have a way to set requries_grad = False for infernce time
-        model_input = self.get_model_input(game_states, player_index)
+        self.device = device
+        self.model = model
 
-        self.model.eval()
+    def get_model_input(
+        self, game_states: list[GameState], player_index: int
+    ) -> torch.Tensor:
+        
 
-        return self.model(model_input).detach().cpu().numpy()
+        # NOTE: Assuming 2 players
+        if len(game_states[0].players) > 2:
+            raise NotImplementedError()
+
+        opponent_index = 1 if player_index == 0 else 0
+        
+        num_rows, num_cols = len(game_states[0].grid), len(game_states[0].grid[0])
+
+        # Shape: (batch_size, 4, tokens)
+        # np_input = np.zeros((len(game_states), 4, num_rows * num_cols))
+
+        np_input = (
+            np.stack([np.where(np.expand_dims(game.grid.flatten(), axis=1), [0, 1, 0, 0], [1, 0, 0, 0]) for game in game_states], axis=0)
+            .astype(np.float32)
+        )
+
+        assert np_input.shape == (len(game_states), num_rows * num_cols, 4)
+
+        for i, game_state in enumerate(game_states):
+
+            hero_player = game_state.players[player_index]
+            opponent_player = game_state.players[opponent_index]
+
+            flattened_hero_index = (hero_player.row * num_cols) + hero_player.col
+            flattened_opponent_index = (opponent_player.row * num_cols) + opponent_player.col
+
+            np_input[i, flattened_hero_index, :] = [0, 0, 1, 0]
+            np_input[i, flattened_opponent_index, :] = [0, 0, 0, 1]
+
+                
+        tensor_output = torch.tensor(np_input, dtype=torch.float32).to(
+            self.device
+        )
+
+        return tensor_output
+    
+
+class EmbeddingTransformerTronModel(TronModelAbstract):
+    def __init__(self, model, device):
+
+        self.device = device
+        self.model = model
+
+    def get_model_input(
+        self, game_states: list[GameState], player_index: int
+    ) -> torch.Tensor:
+        
+
+        # NOTE: Assuming 2 players
+        if len(game_states[0].players) > 2:
+            raise NotImplementedError()
+
+        opponent_index = 1 if player_index == 0 else 0
+        
+        num_rows, num_cols = len(game_states[0].grid), len(game_states[0].grid[0])
+
+        # Shape: (batch_size, 4, tokens)
+        # np_input = np.zeros((len(game_states), 4, num_rows * num_cols))
+
+        np_input = (
+            np.stack([np.where(game.grid.flatten(), 1, 0) for game in game_states], axis=0)
+            .astype(np.uint8)
+        )
+
+        assert np_input.shape == (len(game_states), num_rows * num_cols)
+
+        for i, game_state in enumerate(game_states):
+
+            hero_player = game_state.players[player_index]
+            opponent_player = game_state.players[opponent_index]
+
+            flattened_hero_index = (hero_player.row * num_cols) + hero_player.col
+            flattened_opponent_index = (opponent_player.row * num_cols) + opponent_player.col
+
+            np_input[i, flattened_hero_index] = 2
+            np_input[i, flattened_opponent_index] = 3
+
+                
+        tensor_output = torch.tensor(np_input, dtype=torch.long).to(
+            self.device
+        )
+
+        return tensor_output
+
+
+
+
+

@@ -35,7 +35,7 @@ def init_utility_gui(game_dimension):
     clock = pygame.time.Clock()
 
 
-def show_game_state(game, minimax_debug_state: Optional[MinimaxDebugState] = None):
+def show_game_state(game, step_through=False, minimax_debug_state: Optional[MinimaxDebugState] = None):
     global gui_initialized
 
     if not gui_initialized:
@@ -64,6 +64,7 @@ def show_game_state(game, minimax_debug_state: Optional[MinimaxDebugState] = Non
     pygame.display.flip()
     clock.tick(20)
 
+
     waiting = True
     while waiting:
         for event in pygame.event.get():
@@ -81,6 +82,9 @@ def show_game_state(game, minimax_debug_state: Optional[MinimaxDebugState] = Non
                     return Direction.DOWN
                 if event.key == K_d:
                     return Direction.RIGHT
+                
+        if not step_through:
+            return None
 
 
 def show_minimax_debug_info(minimax_debug_state: MinimaxDebugState):
