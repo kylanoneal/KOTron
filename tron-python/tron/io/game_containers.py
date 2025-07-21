@@ -4,7 +4,7 @@ from enum import Enum
 from pathlib import Path
 from jsonschema import validate
 
-from game.tron import Tron
+from tron.game import  Tron
 from containers.game_schemas import GAME_COLLECTION_SCHEMA, GAME_SCHEMA
 
 class GameResult(Enum):

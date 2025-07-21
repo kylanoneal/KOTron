@@ -3,10 +3,10 @@ import torch
 import numpy as np
 from abc import ABC, abstractmethod
 
-from game import tron
-from game.tron import GameState, Direction
-from ai.tron_model import TronModelAbstract
-from ai.minimax import minimax_alpha_beta_eval_all, basic_minimax, minimax_dumb
+
+from tron.game import  GameState, Direction
+from tron.ai.tron_model import TronModelAbstract
+from tron.ai.minimax import minimax_alpha_beta_eval_all, basic_minimax, minimax_dumb
 
 
 def choose_direction_model_naive(

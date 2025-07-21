@@ -2,12 +2,12 @@ import pytest
 import torch
 import random
 
-from ai.pytorch_game_utils import (
+from tron.ai.pytorch_game_utils import (
     get_position_evaluation,
     get_model_input_from_raw_info,
     GameResult,
 )
-from game.tron import Tron
+from tron.game import  Tron
 
 # TODO:
 device = "cuda"

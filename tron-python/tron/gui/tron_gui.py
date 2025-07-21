@@ -3,8 +3,8 @@ import pickle
 import random
 from pathlib import Path
 from typing import Optional
-from ai.heuristic_bot import RandomBot, ReinforcementBot, TronBot
-from game.tron import Tron, Directions
+from tron.ai.heuristic_bot import RandomBot, ReinforcementBot, TronBot
+from tron.game import  Tron, Directions
 from copy import deepcopy
 
 

@@ -1,8 +1,8 @@
 import zmq
 import numpy as np
-from tron_io import tron_pb2  # This is the generated file from your .proto schema
+from tron.io import tron_pb2  # This is the generated file from your .proto schema
 
-from game.tron import GameState, Player
+from tron.game import  GameState, Player
 
 def to_proto(game_data: list[list[GameState]]):
     # Create an instance of GameState

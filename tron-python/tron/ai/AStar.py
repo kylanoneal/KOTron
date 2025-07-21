@@ -1,5 +1,5 @@
 from collections import defaultdict
-from game.tron import Tron
+from tron.game import  Tron
 
 def reconstruct_path(cameFrom, current):
     total_path = [current]

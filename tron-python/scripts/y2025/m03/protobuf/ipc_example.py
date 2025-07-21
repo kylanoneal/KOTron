@@ -9,20 +9,20 @@ from pathlib import Path
 
 from torch.utils.tensorboard import SummaryWriter
 
-from game import tron
+
 from game.tron import GameState, GameStatus, StatusInfo, Direction
 
-# from ai.algos import (
+# from tron.ai.algos import (
 #     #choose_direction_model_naive,
 #     # choose_direction_random,
 #     #choose_direction_minimax,
 # )
 
-from ai.minimax import minimax_alpha_beta_eval_all, cache, MinimaxContext, MinimaxResult
-from ai.model_architectures import FastNet, EvaluationNetConv3OneStride, LeakyReLU
-from ai.tron_model import StandardTronModel
+from tron.ai.minimax import minimax_alpha_beta_eval_all, cache, MinimaxContext, MinimaxResult
+from tron.ai.model_architectures import FastNet, EvaluationNetConv3OneStride, LeakyReLU
+from tron.ai.tron_model import StandardTronModel
 
-from ai.training import train_loop, make_dataloader, get_weights_sum_of_squares
+from tron.ai.training import train_loop, make_dataloader, get_weights_sum_of_squares
 
 from tron_io.to_proto import to_proto, from_proto
 

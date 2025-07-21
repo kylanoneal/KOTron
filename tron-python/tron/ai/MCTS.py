@@ -1,8 +1,8 @@
 import numpy as np
 from copy import deepcopy
 
-from ai.pytorch_game_utils import get_model_input_from_raw_info, get_relevant_info_from_game_state
-from game.tron import Tron
+from tron.ai.pytorch_game_utils import get_model_input_from_raw_info, get_relevant_info_from_game_state
+from tron.game import  Tron
 
 
 class Node:

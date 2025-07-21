@@ -1,8 +1,8 @@
 import copy
 import random
-from ai.AStar import does_path_exist
-from game.tron import Tron, Directions
-from ai.pytorch_game_utils import get_model, get_next_action, get_random_next_action
+from tron.ai.AStar import does_path_exist
+from tron.game import  Tron, Directions
+from tron.ai.pytorch_game_utils import get_model, get_next_action, get_random_next_action
 
 
 class Evaluation:

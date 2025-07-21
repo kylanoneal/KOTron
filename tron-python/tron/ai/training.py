@@ -2,9 +2,9 @@ import torch
 import numpy as np
 from torch.utils.data import Dataset, DataLoader
 
-from game import tron
-from game.tron import GameState, GameStatus
-from ai.tron_model import TronModelAbstract
+
+from tron.game import  GameState, GameStatus
+from tron.ai.tron_model import TronModelAbstract
 
 
 # NOTE: Where does this belong?

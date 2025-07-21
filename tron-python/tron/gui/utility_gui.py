@@ -1,6 +1,6 @@
 from typing import Optional
-from game.tron import Direction
-from ai.minimax import MinimaxDebugState
+from tron.game import Direction
+from tron.ai.minimax import MinimaxDebugState
 
 import pygame
 from pygame.locals import *

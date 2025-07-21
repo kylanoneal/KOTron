@@ -1,15 +1,18 @@
 import json
 import torch
 import shutil
+import random
 import datetime
 from tqdm import tqdm
 from copy import deepcopy
 from pathlib import Path
 
+import tron
+
 from torch.utils.tensorboard import SummaryWriter
 
-
-from game.tron import GameState, GameStatus, StatusInfo, Direction
+from tron.game import GameState, GameStatus, StatusInfo, Direction
+from tron.gui.utility_gui import show_game_state
 
 # from tron.ai.algos import (
 #     #choose_direction_model_naive,
@@ -19,11 +22,11 @@ from game.tron import GameState, GameStatus, StatusInfo, Direction
 
 from tron.ai.minimax import minimax_alpha_beta_eval_all, cache, MinimaxContext, MinimaxResult
 from tron.ai.model_architectures import FastNet, EvaluationNetConv3OneStride, LeakyReLU
-from tron.ai.tron_model import StandardTronModel
+from tron.ai.tron_model import CnnTronModel
 
 from tron.ai.training import train_loop, make_dataloader, get_weights_sum_of_squares
 
-from tron_io.to_proto import to_proto, from_proto
+from tron.io.to_proto import to_proto, from_proto
 
 
 if __name__ == "__main__":
@@ -35,13 +38,14 @@ if __name__ == "__main__":
     device = torch.device("cpu")
 
     state_dict = torch.load(
-        "C:/Users/kylan/Documents/code/repos/KOTron/python/scripts/y2024/2024_12_15_alpha_beta/leaky_relu_continuation_v4_122.pth"
+        r"C:\Users\kylan\Documents\code\repos\KOTron\tron-python\scripts\y2024\2024_12_15_alpha_beta\leaky_relu_continuation_v4_122.pth"    
     )
     torch_model = LeakyReLU(grid_dim=10)
     torch_model.load_state_dict(state_dict)
+
     torch_model = torch_model.to(device)
 
-    model = StandardTronModel(torch_model, device)
+    model = CnnTronModel(torch_model, device)
 
     ############################################
     # TRAINING SETUP / HYPERPARAMETERS
@@ -57,7 +61,7 @@ if __name__ == "__main__":
     # TENSORBOARD AND MODEL CHECKPOINT SETUP
     ############################################
 
-    run_uid = "protobuf_test_v1"
+    run_uid = "obstacles_v2"
 
     current_script_path = Path(__file__).resolve()
 
@@ -89,6 +93,10 @@ if __name__ == "__main__":
     n_games_per_loop = 384
     checkpoint_every_n_cyles = 5
 
+    p_neutral_start = 1.0
+    p_obstacles = 0.0
+    obstacle_density_range = (0.0, 0.3)
+
     total_games_tied = total_p1_wins = total_p2_wins = 0
  
     for train_iter in range(n_train_sim_cycles):
@@ -102,7 +110,12 @@ if __name__ == "__main__":
 
         for j in tqdm(range(n_games_per_loop)):
 
-            game = tron.new_game(num_players=2, num_rows=10, num_cols=10, random_starts=True, neutral_starts=False)
+            is_neutral_start = p_neutral_start > random.random() 
+            are_obstacles = p_obstacles > random.random()
+
+            obstacle_density = random.uniform(obstacle_density_range[0], obstacle_density_range[1]) if are_obstacles else 0.0
+
+            game = GameState.new_game(num_players=2, num_rows=10, num_cols=10, random_starts=True, neutral_starts=is_neutral_start, obstacle_density=obstacle_density)
 
             game_status: StatusInfo = tron.get_status(game)
 
@@ -113,21 +126,23 @@ if __name__ == "__main__":
 
                 p1_mm_result: MinimaxResult = minimax_alpha_beta_eval_all(
                     game,
-                    depth=4,
+                    depth=6,
                     is_maximizing_player=True,
                     context=MinimaxContext(model, maximizing_player=0, minimizing_player=1)
                 )
 
-                p2_mm_result: MinimaxResult = minimax_alpha_beta_eval_all(
-                    game,
-                    depth=4,
-                    is_maximizing_player=True,
-                    context=MinimaxContext(model, maximizing_player=1, minimizing_player=0)
-                )
+                # p2_mm_result: MinimaxResult = minimax_alpha_beta_eval_all(
+                #     game,
+                #     depth=3,
+                #     is_maximizing_player=True,
+                #     context=MinimaxContext(model, maximizing_player=1, minimizing_player=0)
+                # )
 
                 p1_direction = Direction.UP if p1_mm_result.principal_variation is None else p1_mm_result.principal_variation
-                p2_direction = Direction.UP if p2_mm_result.principal_variation is None else p2_mm_result.principal_variation
-                
+                # p2_direction = Direction.UP if p2_mm_result.principal_variation is None else p2_mm_result.principal_variation
+                p2_direction = show_game_state(game, step_through=True)
+
+
                 game = tron.next(
                     game, directions=(p1_direction, p2_direction)
                 )
@@ -152,15 +167,6 @@ if __name__ == "__main__":
         with open(data_out_folder / f"game_data_iter_{train_iter}_ngames_{n_games_per_loop}.bin", "wb") as f:
             f.write(serialized_data)
 
-        # print("Game state saved to disk as game_state.bin.")
-
-        # unserialized_data = from_proto(serialized_data)
-
-        # for g1, g2 in zip(all_game_states, unserialized_data):
-        #     for gs1, gs2 in zip(g1, g2):
-        #         print(f"\nNormal\n: {gs1}, \n\n unserialized:\n {gs2}")
-        #         assert gs1 == gs2
-
 
         print(f"This iter P1 wins: {p1_wins}, p2 wins: {p2_wins}, ties: {games_tied}")
 
@@ -168,7 +174,7 @@ if __name__ == "__main__":
         total_p1_wins += p1_wins
         total_p2_wins += p2_wins
 
-        
+    
         print(f"Running total P1 wins: {total_p1_wins}, p2 wins: {total_p2_wins}, ties: {total_games_tied}")
 
         tb_writer.add_scalar("Player 1 Winrate", p1_wins / n_games_per_loop, train_iter)
@@ -194,3 +200,5 @@ if __name__ == "__main__":
 
         if train_iter % checkpoint_every_n_cyles == 0:
             torch.save(model.model.state_dict(), checkpoints_folder / f"{run_uid}_{train_iter}.pth")
+
+

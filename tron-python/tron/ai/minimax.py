@@ -4,10 +4,10 @@ from typing import Optional
 from cachetools import LRUCache, cached
 from dataclasses import dataclass
 
-from game import tron
-from game.tron import GameState, GameStatus, Direction
+import tron
+from tron.game import  GameState, GameStatus, Direction
 
-from ai.tron_model import TronModelAbstract
+from tron.ai.tron_model import TronModelAbstract
 
 
 # TODO: Change args to player pos, opponent pos, direction?

@@ -2,7 +2,7 @@ import torch
 import numpy as np
 from abc import ABC, abstractmethod
 
-from game.tron import GameState
+from tron.game import  GameState
 
 
 class TronModelAbstract(ABC):

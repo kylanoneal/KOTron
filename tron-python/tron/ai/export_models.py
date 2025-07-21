@@ -3,7 +3,7 @@ import torch
 
 
 
-from ai.model_architectures_old import EvaluationNetConv3OneStride
+from tron.ai.model_architectures_old import EvaluationNetConv3OneStride
 
 device = torch.device("cpu")
 

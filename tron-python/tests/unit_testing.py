@@ -1,4 +1,4 @@
-# from ai.reinforcement_learning import 
+# from tron.ai.reinforcement_learning import 
 # from game.utility_gui import *
 
 # def print_head_locations(model_input):

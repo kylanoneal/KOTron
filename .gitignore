@@ -15,6 +15,12 @@
 *runs*/
 *logs*/
 
+# Pip stuff
+*.egg-info/
+.eggs/
+build/
+dist/
+
 # Rust stuff
 *target*/
 *.lock

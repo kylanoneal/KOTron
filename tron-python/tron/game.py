@@ -82,6 +82,153 @@ class GameState:
         return hash((self.grid.tobytes(), self.players))
 
 
+    @staticmethod
+    def new_game(
+        num_players: int = 2,
+        num_rows: int = 10,
+        num_cols: int = 10,
+        random_starts: bool = False,
+        neutral_starts: bool = False,
+        obstacle_density: float = 0.0
+    ) -> 'GameState':
+        """
+        Init game without pre-initialized players.
+        """
+
+        if obstacle_density > 0.8:
+            raise ValueError("Too many obstacles.")
+        
+        grid = np.zeros((num_rows, num_cols), dtype=bool)
+
+        if obstacle_density > 0.0:
+            # Calculate the total number of True values based on density
+            num_obstacles = int(num_rows * num_cols * obstacle_density)
+            
+            # Randomly select indices to set to True
+            true_indices = np.random.choice(num_rows * num_cols, num_obstacles, replace=False)
+            
+            # Convert flat indices to row, column coordinates and set corresponding cells to True
+            grid.ravel()[true_indices] = True
+            
+        # Becomes self.players Tuple after Player objects are appended
+        player_list = []
+
+        starts = set()
+
+        if random_starts:
+
+
+            if not neutral_starts:
+                i = 0
+                while i < num_players:
+                    random_start = (
+                        random.randrange(1, num_rows - 1),
+                        random.randrange(1, num_cols - 1),
+                    )
+                    if random_start not in starts:
+                        starts.add(random_start)
+                        player_list.append(
+                            Player(
+                                random_start[0],
+                                random_start[1],
+                                can_move=True,
+                            )
+                        )
+                        i += 1
+            # Neutral start (symmetric over horizontal, vertical, or diagonal axis)
+            else:
+                if num_players > 2:
+                    raise NotImplementedError()
+                
+                retries = 0
+
+                print(f"neutral starts implementation is kidna cringe.")
+
+                # TODO: This retries stuff is jank. Also not sure if this is always 100% neutral
+                while retries < 100:
+                    player_list = []
+                
+                    rand_row = random.randrange(1, num_rows - 1)
+                    rand_col = random.randrange(1, num_cols - 1)
+
+                    player_list.append(
+                        Player(
+                            rand_row,
+                            rand_col,
+                            can_move=True,
+                        )
+                    )
+
+                    c_row = (num_rows - 1) / 2
+                    c_col = (num_cols - 1) / 2
+
+                    def rotate_pos(row, col, angle):
+
+                        if angle == 0:
+                            return row, col
+                        elif angle == 90:  # 90 degrees clockwise
+                            row_new = int(c_col - (col - c_col))
+                            col_new = int(row - c_row + c_row)
+                        elif angle == 180:  # 180 degrees
+                            row_new = int(2 * c_row - row)
+                            col_new = int(2 * c_col - col)
+                        elif angle == 270:  # 270 degrees clockwise
+                            row_new = int(col - c_col + c_row)
+                            col_new = int(c_row - (row - c_row))
+                        else:
+                            raise ValueError("Angle must be 90, 180, or 270 degrees")
+                        return (row_new, col_new)
+
+                    neutral_oppo_row = rand_row
+                    neutral_oppo_col = rand_col
+
+                    do_flip = random.random() > 0.5
+
+                    if do_flip:
+                        neutral_oppo_col = num_cols - rand_col
+                        neutral_oppo_row, neutral_oppo_col = rotate_pos(neutral_oppo_row, neutral_oppo_col, random.choice([0, 90, 180, 270]))
+                    else:
+                        neutral_oppo_row, neutral_oppo_col = rotate_pos(neutral_oppo_row, neutral_oppo_col, random.choice([90, 180, 270]))
+
+                    player_list.append(
+                        Player(
+                            neutral_oppo_row,
+                            neutral_oppo_col,
+                            can_move=True,
+                        )
+                    )
+                    if not (neutral_oppo_row == rand_row and neutral_oppo_col == rand_col):
+                        break
+                    else:
+                        retries += 1
+                else:
+                    raise RuntimeError("Extremely unlucky.")
+
+        else:
+
+            raise NotImplementedError("cringe.")
+
+            if num_players == 2:
+                default_starts = GameState.TWO_PLAYER_DEFAULT_STARTS
+            else:
+                raise NotImplementedError()
+
+            for i in range(num_players):
+
+                player_list.append(
+                    Player(
+                        row=int(default_starts[i].row_fraction * num_rows),
+                        col=int(default_starts[i].col_fraction * num_cols),
+                        can_move=True,
+                    )
+                )
+
+        players = tuple(player_list)
+
+        for player in players:
+            grid[player.row, player.col] = True
+
+        return GameState(grid, players)
 
 @dataclass
 class DefaultStart:
@@ -171,152 +318,6 @@ def from_players(players: tuple[Player], num_rows=10, num_cols=10) -> GameState:
 
     return GameState(grid, players)
 
-def new_game(
-    num_players: int = 2,
-    num_rows: int = 10,
-    num_cols: int = 10,
-    random_starts: bool = False,
-    neutral_starts: bool = False,
-    obstacle_density: float = 0.0
-) -> GameState:
-    """
-    Init game without pre-initialized players.
-    """
-
-    if obstacle_density > 0.8:
-        raise ValueError("Too many obstacles.")
-    
-    grid = np.zeros((num_rows, num_cols), dtype=bool)
-
-    if obstacle_density > 0.0:
-        # Calculate the total number of True values based on density
-        num_obstacles = int(num_rows * num_cols * obstacle_density)
-        
-        # Randomly select indices to set to True
-        true_indices = np.random.choice(num_rows * num_cols, num_obstacles, replace=False)
-        
-        # Convert flat indices to row, column coordinates and set corresponding cells to True
-        grid.ravel()[true_indices] = True
-        
-    # Becomes self.players Tuple after Player objects are appended
-    player_list = []
-
-    starts = set()
-
-    if random_starts:
-
-
-        if not neutral_starts:
-            i = 0
-            while i < num_players:
-                random_start = (
-                    random.randrange(1, num_rows - 1),
-                    random.randrange(1, num_cols - 1),
-                )
-                if random_start not in starts:
-                    starts.add(random_start)
-                    player_list.append(
-                        Player(
-                            random_start[0],
-                            random_start[1],
-                            can_move=True,
-                        )
-                    )
-                    i += 1
-        # Neutral start (symmetric over horizontal, vertical, or diagonal axis)
-        else:
-            if num_players > 2:
-                raise NotImplementedError()
-            
-            retries = 0
-
-            print(f"neutral starts implementation is kidna cringe.")
-
-            # TODO: This retries stuff is jank. Also not sure if this is always 100% neutral
-            while retries < 100:
-                player_list = []
-            
-                rand_row = random.randrange(1, num_rows - 1)
-                rand_col = random.randrange(1, num_cols - 1)
-
-                player_list.append(
-                    Player(
-                        rand_row,
-                        rand_col,
-                        can_move=True,
-                    )
-                )
-
-                c_row = (num_rows - 1) / 2
-                c_col = (num_cols - 1) / 2
-
-                def rotate_pos(row, col, angle):
-
-                    if angle == 0:
-                        return row, col
-                    elif angle == 90:  # 90 degrees clockwise
-                        row_new = int(c_col - (col - c_col))
-                        col_new = int(row - c_row + c_row)
-                    elif angle == 180:  # 180 degrees
-                        row_new = int(2 * c_row - row)
-                        col_new = int(2 * c_col - col)
-                    elif angle == 270:  # 270 degrees clockwise
-                        row_new = int(col - c_col + c_row)
-                        col_new = int(c_row - (row - c_row))
-                    else:
-                        raise ValueError("Angle must be 90, 180, or 270 degrees")
-                    return (row_new, col_new)
-
-                neutral_oppo_row = rand_row
-                neutral_oppo_col = rand_col
-
-                do_flip = random.random() > 0.5
-
-                if do_flip:
-                    neutral_oppo_col = num_cols - rand_col
-                    neutral_oppo_row, neutral_oppo_col = rotate_pos(neutral_oppo_row, neutral_oppo_col, random.choice([0, 90, 180, 270]))
-                else:
-                    neutral_oppo_row, neutral_oppo_col = rotate_pos(neutral_oppo_row, neutral_oppo_col, random.choice([90, 180, 270]))
-
-                player_list.append(
-                    Player(
-                        neutral_oppo_row,
-                        neutral_oppo_col,
-                        can_move=True,
-                    )
-                )
-                if not (neutral_oppo_row == rand_row and neutral_oppo_col == rand_col):
-                    break
-                else:
-                    retries += 1
-            else:
-                raise RuntimeError("Extremely unlucky.")
-
-    else:
-
-        raise NotImplementedError("cringe.")
-
-        if num_players == 2:
-            default_starts = GameState.TWO_PLAYER_DEFAULT_STARTS
-        else:
-            raise NotImplementedError()
-
-        for i in range(num_players):
-
-            player_list.append(
-                Player(
-                    row=int(default_starts[i].row_fraction * num_rows),
-                    col=int(default_starts[i].col_fraction * num_cols),
-                    can_move=True,
-                )
-            )
-
-    players = tuple(player_list)
-
-    for player in players:
-        grid[player.row, player.col] = True
-
-    return GameState(grid, players)
 
 
 # TODO - should this be somewhere else?
