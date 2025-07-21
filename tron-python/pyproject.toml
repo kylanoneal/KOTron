@@ -1,0 +1,33 @@
+[build-system]
+# use setuptools to build, output a wheel
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tron-python"                 # the name on PyPI
+version = "0.1.0"                    # your initial release
+description = "Utilities and AI for a 2D Tron game"
+readme = "README.md"                 # include your README
+requires-python = ">=3.8"            # minimal Python version
+license = { text = "MIT" }           # or point to a file with { file="LICENSE" }
+authors = [
+  { name = "Your Name", email = "you@example.com" }
+]
+dependencies = [                     # runtime dependencies (if any)
+  # "numpy>=1.25",
+  # "torch>=2.0"
+]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+]
+
+[tool.setuptools.packages.find]
+# if you keep your packages at src/, use:
+where = ["src"]
+include = ["tron_python", "tron_python.*"]
+
+# —OR— if your subdirectories with __init__.py live at the repo root, use:
+# where = ["."]
+# include = ["*"]
