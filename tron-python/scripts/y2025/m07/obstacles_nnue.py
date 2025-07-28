@@ -14,17 +14,15 @@ from torch.utils.tensorboard import SummaryWriter
 from tron.game import GameState, GameStatus, StatusInfo, Direction
 from tron.gui.utility_gui import show_game_state
 
-# from tron.ai.algos import (
-#     #choose_direction_model_naive,
-#     # choose_direction_random,
-#     #choose_direction_minimax,
-# )
+from tron.ai.algos import choose_direction_random
+
 
 from tron.ai.minimax import minimax_alpha_beta_eval_all, cache, MinimaxContext, MinimaxResult
-from tron.ai.model_architectures import FastNet, EvaluationNetConv3OneStride, LeakyReLU
-from tron.ai.tron_model import CnnTronModel
 
-from tron.ai.training import train_loop, make_dataloader, get_weights_sum_of_squares
+from tron.ai.nnue import NnueTronModel
+from tron.ai.tron_model import RandomTronModel
+
+from tron.ai.training import train_loop, make_dataloader, get_weights_sum_of_squares, print_state_and_sos
 
 from tron.io.to_proto import to_proto, from_proto
 
@@ -37,15 +35,16 @@ if __name__ == "__main__":
 
     device = torch.device("cpu")
 
+    model = NnueTronModel(10, 10)
+
     state_dict = torch.load(
-        r"C:\Users\kylan\Documents\code\repos\KOTron\tron-python\scripts\y2024\2024_12_15_alpha_beta\leaky_relu_continuation_v4_122.pth"    
+        r"C:\Users\kylan\Documents\code\repos\KOTron\tron-python\scripts\y2025\m07\runs\20250723-234433_nnue_v6_continuation\checkpoints\nnue_v6_continuation_809.pth"    
     )
-    torch_model = LeakyReLU(grid_dim=10)
-    torch_model.load_state_dict(state_dict)
+    model.load_state_dict(state_dict)
 
-    torch_model = torch_model.to(device)
+    model.to(device)
 
-    model = CnnTronModel(torch_model, device)
+    # random_model = RandomTronModel()
 
     ############################################
     # TRAINING SETUP / HYPERPARAMETERS
@@ -55,13 +54,13 @@ if __name__ == "__main__":
     shuffle = True
 
     criterion = torch.nn.MSELoss()
-    optimizer = torch.optim.Adam(model.model.parameters())
+    optimizer = torch.optim.Adam(model.parameters())
 
     ############################################
     # TENSORBOARD AND MODEL CHECKPOINT SETUP
     ############################################
 
-    run_uid = "obstacles_v2"
+    run_uid = "nnue_v7_continuation"
 
     current_script_path = Path(__file__).resolve()
 
@@ -86,15 +85,43 @@ if __name__ == "__main__":
     tb_writer = SummaryWriter(log_dir=run_folder)
 
     ############################################
+    # PRE-TRAIN
+    ############################################
+    
+    # data_dir = Path(r"C:\Users\kylan\Documents\code\repos\KOTron\tron-python\scripts\y2025\m06\make_random_data\runs\20250604-220539_obstacles_v2\game_data")
+
+    # for i, data_file in tqdm(enumerate(list(data_dir.iterdir())[:200])):
+        
+    #     # Save the serialized data to a file.
+    #     with open(data_file, "rb") as f:
+    #         bin_data = f.read()
+
+    #     game_data = from_proto(bin_data)
+
+    #     dataloader = make_dataloader(
+    #         game_data, batch_size=batch_size, shuffle=shuffle
+    #     )
+
+    #     avg_loss, avg_pred_magnitude = train_loop(model, dataloader, optimizer, criterion, device, epochs=1)
+    #     weights_sos = get_weights_sum_of_squares(model)
+
+    #     print(f"{avg_loss=:.3f}, {avg_pred_magnitude=:.3f}, {weights_sos=:.3f}")
+    #     print_state_and_sos(model, decimals=3)
+
+    #     if i % 10 == 0:
+    #         torch.save(model.state_dict(), checkpoints_folder / f"pretrain_{run_uid}_{i}.pth")
+
+
+    ############################################
     # SIMULATION-TRAIN LOOP
     ############################################
 
-    n_train_sim_cycles = 1_000_000
-    n_games_per_loop = 384
-    checkpoint_every_n_cyles = 5
+    n_train_sim_cycles = 100_000
+    n_games_per_loop = 32
+    checkpoint_every_n_cyles = 1
 
-    p_neutral_start = 1.0
-    p_obstacles = 0.0
+    p_neutral_start = 0.75
+    p_obstacles = 0.3
     obstacle_density_range = (0.0, 0.3)
 
     total_games_tied = total_p1_wins = total_p2_wins = 0
@@ -103,6 +130,8 @@ if __name__ == "__main__":
 
         # TODO: Clear da cache once model has been updated, this shouldn't be here probably
         cache.clear()
+        # NOTE: Need to reset accumulator once weights have been updated
+        model.reset_acc()
 
         all_game_states = []
 
@@ -126,21 +155,25 @@ if __name__ == "__main__":
 
                 p1_mm_result: MinimaxResult = minimax_alpha_beta_eval_all(
                     game,
-                    depth=3,
+                    depth=6,
                     is_maximizing_player=True,
                     context=MinimaxContext(model, maximizing_player=0, minimizing_player=1)
                 )
 
-                # p2_mm_result: MinimaxResult = minimax_alpha_beta_eval_all(
-                #     game,
-                #     depth=3,
-                #     is_maximizing_player=True,
-                #     context=MinimaxContext(model, maximizing_player=1, minimizing_player=0)
-                # )
+                p2_mm_result: MinimaxResult = minimax_alpha_beta_eval_all(
+                    game,
+                    depth=6,
+                    is_maximizing_player=True,
+                    context=MinimaxContext(model, maximizing_player=1, minimizing_player=0)
+                )
 
                 p1_direction = Direction.UP if p1_mm_result.principal_variation is None else p1_mm_result.principal_variation
-                # p2_direction = Direction.UP if p2_mm_result.principal_variation is None else p2_mm_result.principal_variation
-                p2_direction = show_game_state(game, step_through=True)
+                p2_direction = Direction.UP if p2_mm_result.principal_variation is None else p2_mm_result.principal_variation
+
+                # p2_direction = show_game_state(game, step_through=True)
+
+                #p1_direction = choose_direction_random(game, 0)
+                # p2_direction = choose_direction_random(game, 1)
 
 
                 game = tron.next(
@@ -189,16 +222,20 @@ if __name__ == "__main__":
         print(f"Training time! Iter: {train_iter}")
 
         dataloader = make_dataloader(
-            all_game_states, model, batch_size=batch_size, shuffle=shuffle
+            all_game_states, batch_size=batch_size, shuffle=shuffle
         )
 
-        avg_loss, avg_pred_magnitude = train_loop(model.model, dataloader, optimizer, criterion, device, epochs=1)
+        avg_loss, avg_pred_magnitude = train_loop(model, dataloader, optimizer, criterion, device, epochs=1)
+        weights_sos = get_weights_sum_of_squares(model)
 
-        tb_writer.add_scalar("Sum of Squares of Weights", get_weights_sum_of_squares(model.model), train_iter)
+        print(f"{avg_loss=:.3f}, {avg_pred_magnitude=:.3f}, {weights_sos=:.3f}")
+        print_state_and_sos(model, decimals=3)
+
+        tb_writer.add_scalar("Sum of Squares of Weights", weights_sos, train_iter)
         tb_writer.add_scalar("Average Loss", avg_loss, train_iter)
         tb_writer.add_scalar("Average Prediction Magnitude", avg_pred_magnitude, train_iter)
 
         if train_iter % checkpoint_every_n_cyles == 0:
-            torch.save(model.model.state_dict(), checkpoints_folder / f"{run_uid}_{train_iter}.pth")
+            torch.save(model.state_dict(), checkpoints_folder / f"{run_uid}_{train_iter}.pth")
 
 

@@ -1,10 +1,11 @@
+from collections import OrderedDict
 import torch
 import numpy as np
 from torch.utils.data import Dataset, DataLoader
 
-
+import tron
 from tron.game import  GameState, GameStatus
-from tron.ai.tron_model import TronModelAbstract
+from tron.ai.tron_model import TronModel, HeroGameState
 
 
 # NOTE: Where does this belong?
@@ -16,15 +17,42 @@ def get_weights_sum_of_squares(model):
             total_sum_of_squares += torch.sum(param.data.pow(2))
     return total_sum_of_squares.item()
 
+def print_state_and_sos(model, decimals=6):
+    # """Print each entry in state_dict and the sum of squares of learnable params."""
+    # # 1) Raw / shaped state_dict (optional: huge tensors truncated by repr)
+    # for k, v in model.state_dict().items():
+    #     print(f"{k:40s} shape={tuple(v.shape)} dtype={v.dtype}")
+
+    # 2) Sum of squares per parameter tensor
+    sos = OrderedDict()
+    with torch.no_grad():
+        for name, p in model.named_parameters():
+            val = (p.detach() ** 2).sum().item()
+            sos[name] = round(val, decimals)
+
+    # Pretty print
+    print("\nSum of squares (weights/biases):")
+    for k, v in sos.items():
+        print(f"{k:40s} {v}")
+
+    print(f"\nTOTAL: {round(sum(sos.values()), decimals)}")
+    return sos
+
+
+def collate_fn(x):
+    inputs, labels = zip(*x)
+    labels = torch.tensor(labels)
+
+    return inputs, labels
+
 
 def make_dataloader(
     game_data: list[list[GameState]],
-    model: TronModelAbstract,
     batch_size: int,
     shuffle: bool = True,
     include_ties = True
 ) -> DataLoader:
-
+    
     dataset = []
 
     for game_states in game_data:
@@ -36,43 +64,59 @@ def make_dataloader(
 
         assert not terminal_status.status == GameStatus.IN_PROGRESS
 
+        if terminal_status.status == GameStatus.WINNER:
+            assert terminal_status.winner_index is not None
+            assert 0 <= terminal_status.winner_index < 2
+
+
         # TODO: "Think about how the first couple moves of the game should be represented"
         # TODO: Add rotation augmentation
 
-        game_progs = [
-            turn_index / (len(game_states) - 1)
-            for turn_index in range(len(game_states))
-        ]
+        # game_progs = [
+        #     turn_index / (len(game_states) - 1)
+        #     for turn_index in range(len(game_states))
+        # ]
 
         # NOTE: Assumes 2 players
         for player_index in range(2):
+                
+            # NOTE: DONT INCLUDE TERMINAL STATE!!!
 
-            model_inputs = model.get_model_input(game_states, player_index)
+            num_active_turns = len(game_states) - 1
+            for i, game_state in enumerate(game_states[:-1]):
 
-            assert len(game_progs) == model_inputs.shape[0]
+            #for game_state, game_prog in zip(game_states, game_progs):
 
-            for game_prog, model_input in zip(game_progs, model_inputs):
+                assert len(game_state.players) == 2
+                assert tron.get_status(game_state).status == GameStatus.IN_PROGRESS
 
                 # if game_prog < 0.7:
                 #     print(f"Skipping game prog of : {game_prog}")
                 #     continue
 
-                if terminal_status.winner_index is not None:
-                    eval = (
-                        game_prog
-                        if terminal_status.winner_index == player_index
-                        else -game_prog
-                    )
+                if terminal_status.status == GameStatus.WINNER:
+                    # eval = (
+                    #     game_prog
+                    #     if terminal_status.winner_index == player_index
+                    #     else -game_prog
+                    # )
+
+                    dist_from_end = num_active_turns - (i + 1)
+
+                    eval = 10 * (0.9 ** dist_from_end)
+
+                    if terminal_status.winner_index != player_index:
+                        eval *= -1
                 else:
                     eval = 0.0
 
-                dataset.append((model_input, np.float32(eval)))
+                dataset.append((HeroGameState(game_state, hero_index=player_index), np.float32(eval)))
 
-    return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
+    return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, collate_fn=collate_fn)
 
 
 def train_loop(
-    model: torch.nn.Module,
+    model: TronModel,
     train_dataloader: DataLoader,
     optimizer,
     criterion,
@@ -91,9 +135,11 @@ def train_loop(
         cum_epoch_loss = 0.0
         cum_epoch_magnitude = 0.0
 
-        for inputs, labels in train_dataloader:
+        for _inputs, _labels in train_dataloader:
             # Move data to GPU if available
-            inputs, labels = inputs.to(device), labels.to(device)
+
+            inputs = model.get_model_input(_inputs).to(device)
+            labels = _labels.to(device)
 
             # if np.random.random() < 0.01:
             #     print(f"Mean labels: {labels.mean()}")

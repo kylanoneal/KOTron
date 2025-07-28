@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import tron
 from tron.game import  GameState, GameStatus, Direction
 
-from tron.ai.tron_model import TronModelAbstract
+from tron.ai.tron_model import TronModel, HeroGameState
 
 
 # TODO: Change args to player pos, opponent pos, direction?
@@ -42,8 +42,8 @@ cache = LRUCache(maxsize=20000000)
 
 
 @cached(cache)
-def lru_eval(model: TronModelAbstract, game, player_index):
-    return model.run_inference([game], player_index)[0]
+def lru_eval(model: TronModel, game, player_index):
+    return model.run_inference([HeroGameState(game, player_index)])[0]
 
 
 @dataclass
@@ -68,7 +68,7 @@ class MinimaxResult:
 
 @dataclass
 class MinimaxContext:
-    model: TronModelAbstract
+    model: TronModel
     maximizing_player: int
     minimizing_player: int
     debug_mode: bool = False
