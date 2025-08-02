@@ -1,7 +1,7 @@
 # Model checkpoints
-*.pt
-*.pth
-*.onnx
+# *.pt
+# *.pth
+# *.onnx
 
 # Misc
 *.json
