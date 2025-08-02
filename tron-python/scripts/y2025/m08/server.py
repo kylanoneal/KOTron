@@ -53,7 +53,7 @@ def main(bind_addr="tcp://*:5555"):
     model = NnueTronModel(10, 10)
 
     state_dict = torch.load(
-        r"C:\Users\KylanO'Neal\Non-OneDrive Storage\code\my_repos\KOTron\tron-python\models\mcts_v5_440.pth")
+        r"C:\Users\kylan\Documents\code\repos\KOTron\tron-python\models\20250801_mcts_v6_4590.pth")
     model.load_state_dict(state_dict)
     model.reset_acc()
 
@@ -74,7 +74,7 @@ def main(bind_addr="tcp://*:5555"):
     # TENSORBOARD AND MODEL CHECKPOINT SETUP
     ############################################
 
-    run_uid = "mcts_v6_server"
+    run_uid = "mcts_v7_server"
 
     current_script_path = Path(__file__).resolve()
 
@@ -109,6 +109,8 @@ def main(bind_addr="tcp://*:5555"):
     checkpoint_every = 10
 
     while True:
+
+        model.reset_acc()
 
         games_tied = p1_wins = p2_wins = 0
         # ROUTER.recv_multipart gives [client_id, empty, data]

@@ -10,9 +10,9 @@ import sys
 
 def main():
     # name of the script you want to run in parallel
-    target_script = r"C:\Users\KylanO'Neal\Non-OneDrive Storage\code\my_repos\KOTron\tron-python\scripts\y2025\m08\client.py"
+    target_script = r"C:\Users\kylan\Documents\code\repos\KOTron\tron-python\scripts\y2025\m08\client.py"
     # how many processes to spawn
-    num_procs = 9
+    num_procs = 7
 
     procs = []
     for i in range(num_procs):

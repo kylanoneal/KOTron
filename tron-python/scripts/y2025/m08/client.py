@@ -42,7 +42,7 @@ def main():
     # give yourself a unique ID so server can reply
     my_id = uuid.uuid4().hex.encode()
     sock.setsockopt(zmq.IDENTITY, my_id)
-    sock.connect(f"tcp://192.168.1.67:{5555}")
+    sock.connect(f"tcp://192.168.1.65:{5555}")
     print(f"[CLIENT {my_id!r}] connected")
 
 
@@ -55,7 +55,7 @@ def main():
     model = NnueTronModel(10, 10)
 
     state_dict = torch.load(
-        r"C:\Users\KylanO'Neal\Non-OneDrive Storage\code\my_repos\KOTron\tron-python\models\mcts_v5_440.pth")
+        r"C:\Users\kylan\Documents\code\repos\KOTron\tron-python\models\20250801_mcts_v6_4590.pth")
     model.load_state_dict(state_dict)
     model.reset_acc()
 
@@ -68,7 +68,7 @@ def main():
     # TENSORBOARD AND MODEL CHECKPOINT SETUP
     ############################################
 
-    run_uid = f"mcts_v6_client_{uuid.uuid4()}"
+    run_uid = f"mcts_v7_client_{uuid.uuid4()}"
 
     current_script_path = Path(__file__).resolve()
 
@@ -114,14 +114,7 @@ def main():
 
         games_tied = p1_wins = p2_wins = 0
 
-
-        if i < 500:
-            mcts_iters = 100
-        elif i < 1000:
-            mcts_iters = 200
-        else:
-            mcts_iters = 300
-
+        mcts_iters = 300
 
         for _ in tqdm(range(n_games_per_loop)):
 
