@@ -54,6 +54,68 @@ class GameState:
     grid: np.ndarray[bool]
     players: tuple[Player]
 
+
+    def __post_init__(self):
+        # 1. Validate players container
+        if not isinstance(self.players, tuple):
+            raise TypeError(
+                f"self.players must be a tuple of Player instances, "
+                f"got {type(self.players).__name__}"
+            )
+
+        # 2. Validate grid type, dtype, and dimensions
+        if not isinstance(self.grid, np.ndarray):
+            raise TypeError(
+                f"grid must be a numpy.ndarray, got {type(self.grid).__name__}"
+            )
+        if self.grid.dtype != bool:
+            raise TypeError(
+                f"grid.dtype must be bool, got {self.grid.dtype}"
+            )
+        if self.grid.ndim != 2:
+            raise ValueError(
+                f"grid must be 2-dimensional, got {self.grid.ndim} dimensions"
+            )
+
+        num_rows, num_cols = self.grid.shape
+
+        # 3. Validate each player
+        for idx, player in enumerate(self.players):
+            # 3a. Type check
+            if not isinstance(player, Player):
+                raise TypeError(
+                    f"Element {idx} of self.players must be Player, "
+                    f"got {type(player).__name__}"
+                )
+
+            # 3b. Bounds check
+            if not (0 <= player.row < num_rows):
+                raise IndexError(
+                    f"Player {idx} row index out of bounds: "
+                    f"{player.row} not in [0, {num_rows - 1}]"
+                )
+            if not (0 <= player.col < num_cols):
+                raise IndexError(
+                    f"Player {idx} col index out of bounds: "
+                    f"{player.col} not in [0, {num_cols - 1}]"
+                )
+
+            # 3c. Grid occupancy check
+            if not self.grid[player.row, player.col]:
+                raise ValueError(
+                    f"grid at position ({player.row}, {player.col}) "
+                    f"must be True for a player head"
+                )
+            
+
+            for j in range(idx + 1, len(self.players)):
+                pj: Player = self.players[j]
+
+                if player.row == pj.row and player.col == pj.col:
+                    if player.can_move or pj.can_move:
+                        raise ValueError("Active players occupying same square")
+
+
     def __str__(self):
 
         repr_str = ""
@@ -117,9 +179,9 @@ class GameState:
         if random_starts and not neutral_starts:
 
             random_starts_flat = np.random.choice(num_rows * num_cols, size=num_players, replace=False)
-            random_starts = np.unravel_index(random_starts_flat, grid.shape)
+            random_rows, random_cols = np.unravel_index(random_starts_flat, grid.shape)
                 
-            players = tuple([Player(row, col, can_move=True) for row, col in random_starts])
+            players = tuple([Player(row, col, can_move=True) for row, col in zip(random_rows, random_cols)])
 
         elif random_starts and neutral_starts:
             # Neutral start (symmetric over horizontal, vertical, or diagonal axis)
@@ -235,7 +297,7 @@ def get_possible_directions(game: GameState, player_index):
 
         if (
             in_bounds(game.grid, new_row, new_col)
-            and not game.grid[new_row, new_col]
+            and not game.grid[new_row][new_col]
         ):
             available_directions.append(dir)
 

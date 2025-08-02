@@ -20,7 +20,7 @@ def to_proto(game_data: list[list[GameState]]):
             # Fill the grid into the GameState message
             for row in game_state.grid:
                 grid_row = game_state_pb.grid.add()  # Add a new row
-                grid_row.cells.extend(row)         # Extend the row with the boolean values
+                grid_row.cells.extend(row.tolist())         # Extend the row with the boolean values
             
             for player in game_state.players:
                 player_pb = game_state_pb.players.add()

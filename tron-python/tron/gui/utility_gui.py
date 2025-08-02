@@ -5,8 +5,8 @@ from tron.ai.minimax import MinimaxDebugState
 import pygame
 from pygame.locals import *
 
-LENGTH = 800
-WIDTH = 800
+LENGTH = 500
+WIDTH = 500
 SPEED = 500
 
 WHITE = [255, 255, 255]

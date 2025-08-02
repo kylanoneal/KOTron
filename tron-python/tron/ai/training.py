@@ -1,10 +1,11 @@
 from collections import OrderedDict
 import torch
+import random
 import numpy as np
 from torch.utils.data import Dataset, DataLoader
 
 import tron
-from tron.game import  GameState, GameStatus
+from tron.game import  GameState, GameStatus, Player
 from tron.ai.tron_model import TronModel, HeroGameState
 
 
@@ -46,11 +47,46 @@ def collate_fn(x):
     return inputs, labels
 
 
+
+def affine_aug(game_state: GameState):
+
+    grid = game_state.grid.copy()
+    player_grid = np.zeros_like(grid, dtype=np.uint8)
+
+    for i, player in enumerate(game_state.players):
+        player_grid[player.row][player.col] = i + 1
+
+    do_flip = random.random() > 0.5
+
+    if do_flip:
+
+        grid = np.fliplr(grid)
+        player_grid = np.fliplr(player_grid)
+ 
+
+    n_rot_90 = random.randrange(0,4)
+
+    grid = np.rot90(grid, k=n_rot_90)
+    player_grid = np.rot90(player_grid, k=n_rot_90)
+
+    transformed_players = []
+
+    for i, player in enumerate(game_state.players):
+        ind = np.argwhere(player_grid == i + 1)
+        assert len(ind) == 1 and len(ind[0]) == 2
+        row, col = ind[0]
+
+        transformed_players.append(Player(row, col, player.can_move))
+
+    return GameState(grid, tuple(transformed_players))
+
 def make_dataloader(
     game_data: list[list[GameState]],
     batch_size: int,
     shuffle: bool = True,
-    include_ties = True
+    include_ties = True,
+    do_affine = True,
+    keep_rate = 0.5
 ) -> DataLoader:
     
     dataset = []
@@ -110,7 +146,11 @@ def make_dataloader(
                 else:
                     eval = 0.0
 
-                dataset.append((HeroGameState(game_state, hero_index=player_index), np.float32(eval)))
+                if random.random() < keep_rate:
+
+                    game_state_to_add = affine_aug(game_state) if do_affine else game_state
+
+                    dataset.append((HeroGameState(game_state_to_add, hero_index=player_index), np.float32(eval)))
 
     return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, collate_fn=collate_fn)
 

@@ -1,45 +1,109 @@
+import math
+import random
 import numpy as np
+from tqdm import tqdm
 from copy import deepcopy
 
-from tron.ai.pytorch_game_utils import get_model_input_from_raw_info, get_relevant_info_from_game_state
-from tron.game import  Tron
 
+from tron.ai.tron_model import TronModel, HeroGameState
+from tron.game import GameState, Direction, GameStatus, get_possible_directions, next, get_status
+from tron.ai.minimax import basic_minimax, MinimaxContext, MinimaxResult, lru_eval, cache
+from tron.ai.algos import choose_direction_random
 
 class Node:
-    def __init__(self, state: Tron, player_num, parent=None):
-        self.state = state
-        self.player_num = player_num
+    def __init__(
+        self, 
+        game_state: GameState, 
+        hero_index: int, 
+        is_hero: bool, 
+        prev_move: Direction,
+        eval: float,
+        parent=None
+    ):
+        self.game_state = game_state
+        self.hero_index = hero_index
+        self.is_hero = is_hero
+        self.prev_move = prev_move
+
         self.parent = parent
-        self.children = {}
+        self.children = []
         self.n_visits = 0
-        self.total_reward = 0.0
+        self.total_reward = eval
+        self.eval = eval
         self.is_expanded = False
-        self.is_terminal = False
-        self.value = 0
 
     # Consolidate the expanding of game states to a single place
-    def expand(self, value):
+    def expand(self, mm_context: MinimaxContext):
+
+        assert len(self.children) == 0, "Only should be expanding a node once"
+        assert not self.is_expanded
+
         self.is_expanded = True
-        self.value = value
 
-        available_actions = self.state.get_possible_directions(self.player_num)
+        if self.is_hero:
 
-        for action in available_actions:
-            next_game_state = deepcopy(self.state)
-            next_game_state.update_direction(self.player_num, action)
-            next_game_state.move_racers()
+            opponent_index = 0 if self.hero_index == 1 else 1
+            possible_directions = get_possible_directions(self.game_state, opponent_index)
+            possible_directions = [Direction.UP] if len(possible_directions) == 0 else possible_directions
 
-            self.children[action] = Node(next_game_state, self.player_num, parent=self)
+            for direction in possible_directions:
+                next_dirs = [None, None]
+                next_dirs[opponent_index] = direction
+                next_dirs[self.hero_index] = self.prev_move
 
-        self.is_terminal = not self.children
+                next_game_state = next(self.game_state, next_dirs)
+
+                eval = eval_mcts(next_game_state, is_hero=False, mm_context=mm_context)
+
+                child_node = Node(next_game_state, self.hero_index, is_hero=False, prev_move=direction, parent=self, eval=eval)
+                self.children.append(child_node)
+
+        else:
+            if get_status(self.game_state).status != GameStatus.IN_PROGRESS:
+                return
+
+            possible_directions = get_possible_directions(self.game_state, self.hero_index)
+
+            possible_directions = [Direction.UP] if len(possible_directions) == 0 else possible_directions
+            for direction in possible_directions:
+
+                eval = eval_mcts(self.game_state, is_hero=True, mm_context=mm_context, hero_move=direction)
+
+                child_node = Node(self.game_state, self.hero_index, is_hero=True, prev_move=direction, parent=self, eval=eval)
+
+                self.children.append(child_node)
 
 
-def search(model, game, player_num, head_val, n_iterations, exploration_factor=2):
-    model_type = type(model)
-    root = Node(game, player_num)
+
+def eval_mcts(game_state: GameState, is_hero: bool, mm_context: MinimaxContext, hero_move=None):
+
+    if is_hero:
+
+        assert get_status(game_state).status == GameStatus.IN_PROGRESS
+        eval = basic_minimax(game_state, depth=1, is_maximizing_player=False, context=mm_context, maximizing_player_move=hero_move).evaluation
+    else:
+
+        mm_result = basic_minimax(game_state, depth=0, is_maximizing_player=True, context=mm_context)
+
+        # Negate hero perspective eval
+        eval = -mm_result.evaluation
+
+    return eval
+
+
+def search(model: TronModel, game_state, hero_index, n_iterations, exploration_factor=2, root=None):
+
+    if len(game_state.players) != 2:
+        raise NotImplementedError()
+    
+    opponent_index = 0 if hero_index == 1 else 1
+    mm_context = MinimaxContext(model, maximizing_player=hero_index, minimizing_player=opponent_index)
+
+    if root is None:
+        root = Node(game_state, hero_index, is_hero=False, prev_move=None, eval=0.0)
 
     def find_best_leaf(node) -> Node:
-        while node.is_expanded and not node.is_terminal:
+        while len(node.children) > 0:
             _, node = select(node)
         return node
 
@@ -47,9 +111,9 @@ def search(model, game, player_num, head_val, n_iterations, exploration_factor=2
         best_value = float('-inf')
         best_action = None
         best_child = None
-        # print("about to expand children")
-        # print("node children length:", len(node.children.items()))
-        for action, child in node.children.items():
+
+        #print("\nSelecting child...")
+        for child in node.children:
 
             # IF CHILD UNVISITED ALWAYS VISIT
             # if child.n_visits == 0:
@@ -59,16 +123,18 @@ def search(model, game, player_num, head_val, n_iterations, exploration_factor=2
             # Trying without above approach, adding 1 to child.n_visits in order to avoid divide by zero
             curr_child_visits = child.n_visits + 1
 
-            grid, heads = get_relevant_info_from_game_state(child.state)
-            child_eval = model(get_model_input_from_raw_info(grid, heads, child.player_num,
-                                                             head_val, model_type=model_type))
+            #print(f"{child.is_hero=}, {child_eval=}")
 
-            ucb1_value = (child.total_reward / curr_child_visits) + child_eval + \
-                         np.sqrt(exploration_factor * np.log(node.n_visits) / curr_child_visits)
+            exploitation_value = (child.total_reward / curr_child_visits)
+
+            exploration_value = exploration_factor * np.sqrt(np.log(node.n_visits) / curr_child_visits)
+
+            ucb1_value = exploitation_value + exploration_value
+                         
             # print("Current best value: ", best_value, " current ucb1 value: ", ucb1_value)
             if ucb1_value > best_value:
                 best_value = ucb1_value
-                best_action = action
+                best_action = child.prev_move
                 best_child = child
         return best_action, best_child
 
@@ -80,29 +146,127 @@ def search(model, game, player_num, head_val, n_iterations, exploration_factor=2
 
         return count
 
-    def backpropagate(node, value):
-        if node.parent:
-            node.total_reward += value - node.value
+    def backpropagate(node):
+
+        node.n_visits += 1
+        reward = node.total_reward
+        is_hero_reward = node.is_hero
+
+        while node.parent:
+            node = node.parent
             node.n_visits += 1
-            backpropagate(node.parent, value)
+
+            if node.is_hero == is_hero_reward:
+                node.total_reward += reward
+            else:
+                node.total_reward -= reward
 
     def action_probabilities(node):
 
         actions = []
         visits = []
-        for action, n_visits in node.children.items():
-            actions.append(action)
-            visits.append(n_visits)
+        for child in node.children:
+            actions.append(child.prev_move)
+            visits.append(child.n_visits)
 
         return actions, visits
 
-    for _ in range(n_iterations):
+
+    for _ in range(root.n_visits, n_iterations):
         root.n_visits += 1
         leaf = find_best_leaf(root)
-        grid, heads = get_relevant_info_from_game_state(leaf.state)
-        eval = model(get_model_input_from_raw_info(grid, heads, leaf.player_num, model_type=model_type))
 
-        leaf.expand(eval)
-        backpropagate(leaf, eval)
+        if not leaf.is_expanded:
+            leaf.expand(mm_context)
+        backpropagate(leaf)
 
-    return action_probabilities(root)
+    return root
+    #return action_probabilities(root)
+
+def get_move_pair(node, hero_index, temp=1.0):
+
+    opponent_index = 0 if hero_index == 1 else 1
+
+    if len(node.children) == 0:
+        return (choose_direction_random(node.game_state, hero_index), choose_direction_random(node.game_state, opponent_index), None)
+
+    actions = []
+    visits = []
+
+    for child in node.children:
+        actions.append(child.prev_move)
+        visits.append(child.n_visits)
+
+
+    assert sum(visits) > 0
+    # print(f"\n\nHero:")
+    # for action, visit_count, child in zip(actions, visits, node.children):
+
+    #     print(f"{action.name:<12} {visit_count:<5} {round(child.total_reward, 3):<12}")  # left-align, width 12
+
+    chosen_child_index = softmax_sample(visits, temp=temp)
+    hero_dir = actions[chosen_child_index]
+
+    child_node = node.children[chosen_child_index]
+
+
+    actions = []
+    visits = []
+
+    for grandchild in child_node.children:
+        actions.append(grandchild.prev_move)
+        visits.append(grandchild.n_visits)
+
+    if len(child_node.children) == 0 or sum(visits) == 0:
+        return (hero_dir, choose_direction_random(node.game_state, opponent_index), None)
+
+    # print(f"\n\nOpponent:")
+    # for action, visit_count, child in zip(actions, visits, child_node.children):
+
+    #     print(f"{action.name:<12} {visit_count:<5} {round(child.total_reward, 3):<12}")  # left-align, width 12
+
+
+    chosen_grandchild_index = softmax_sample(visits, temp=temp)
+    grandchild = child_node.children[chosen_grandchild_index]
+    opponent_dir = actions[chosen_grandchild_index] 
+
+
+    return (hero_dir, opponent_dir, grandchild)
+
+def softmax_sample(visits: list[int], temp: float = 1.0) -> int:
+    """
+    Returns (chosen_index, probabilities) where
+        probabilities = softmax(logits / T)
+
+    temp  > 1.0  → flatter distribution (more exploration)  
+    temp  < 1.0  → sharper distribution (more greedy)
+    """
+    if temp <= 0:
+        raise ValueError("Temperature T must be positive.")
+
+    # numerically stable soft-max
+    # max_logit = max(logits)
+    # exps = [math.exp((l - max_logit) / temp) for l in logits]
+    # total = sum(exps)
+    # probs = [e / total for e in exps]
+
+    total_visits = sum(visits)
+    probs = [v / total_visits for v in visits]
+
+
+    exp = [p ** (1.0 / temp) for p in probs]
+    sum_exp = sum(exp)
+    temp_probs = [e / sum_exp for e in exp]
+
+    # print(f"Before temp {probs=}")
+    #print(f"Applied {temp=}, {temp_probs=}")
+    # randomly pick an index according to these probabilities
+    idx = random.choices(range(len(visits)), weights=temp_probs, k=1)[0]
+
+    
+    #print(f"Picked: {idx}")
+    return idx
+
+
+if __name__ == "__main__":
+    print()

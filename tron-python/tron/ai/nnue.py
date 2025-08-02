@@ -26,7 +26,7 @@ class TronModel(nn.Module, ABC):
 
 # --- 2. Define the efficient‐updatable net ---
 class NnueTronModel(TronModel):
-    def __init__(self, num_rows=10, num_cols=10, acc_dim=64, hidden_dim=32):
+    def __init__(self, num_rows=10, num_cols=10, acc_dim=128, hidden_dim=64):
         super().__init__()
         # Embedding table: feature → acc_dim vector
         self.embedding = nn.Embedding(num_rows * num_cols * 3, acc_dim)
@@ -65,10 +65,10 @@ class NnueTronModel(TronModel):
 
     def forward(self, acc):
         # 3. Clamp and run MLP
-        x = torch.clamp(acc, min=0.0, max=127.0)  # mimic 8-bit clamp
-        h = F.relu(self.fc1(x))
+        # x = torch.clamp(acc, min=0.0, max=127.0)  # mimic 8-bit clamp
+        h = F.relu(self.fc1(acc))
         out = self.fc2(h)
-        return out.squeeze()
+        return out.squeeze(-1)
     
 
     def reset_acc(self):

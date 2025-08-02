@@ -9,6 +9,29 @@ from tron.game import  GameState, StatusInfo, GameStatus, Direction
 
 from tron.ai.tron_model import TronModel, HeroGameState
 
+@dataclass
+class MovePair:
+    maximizing_player_move: Direction
+    minimizing_player_move: Direction
+
+class PvTable:
+
+    def __init__(self, max_depth: int):
+
+        self.max_depth = max_depth
+        self._pv_table = [[None for _ in range(max_depth)] for _ in range(max_depth)]
+
+    def get_move_pair(self, depth: int, ply: int) -> MovePair:
+
+        assert depth > 0 and ply >= 0
+
+        return self._pv_table[depth - 1][ply]
+    
+    def set_move_pair(self, depth:int, ply:int, move_pair: MovePair):
+        assert depth > 0 and ply >= 0
+        self._pv_table[depth - 1][ply] = move_pair
+
+        
 
 # TODO: Change args to player pos, opponent pos, direction?
 def heuristic_towards_opponent(
@@ -74,9 +97,11 @@ class MinimaxContext:
     debug_mode: bool = False
 
 
-def minimax_alpha_beta_eval_all(
+def alphabeta(
     game_state: GameState,
     depth: int,
+    ply: int,
+    pv_table: PvTable,
     is_maximizing_player: bool,
     alpha: float = float("-inf"),
     beta: float = float("inf"),
@@ -86,7 +111,6 @@ def minimax_alpha_beta_eval_all(
     assert context is not None, "Context must be passed"
     maximizing_player = context.maximizing_player
     minimizing_player = context.minimizing_player
-    raise NotImplementedError("Fix terminal state control flow.")
 
     # if debug_mode:
     #     raise NotImplementedError()
@@ -143,11 +167,23 @@ def minimax_alpha_beta_eval_all(
             reverse=True,
         )
 
+        # Explore PV first if we have it
+        pv = pv_table.get_move_pair(depth, ply)
+
+        if pv is not None:
+            if pv.maximizing_player_move in sorted_directions:
+                sorted_directions.remove(pv.maximizing_player_move)
+                sorted_directions.insert(0, pv.maximizing_player_move)
+            
+
+
         max_eval = float("-inf")
         for direction in sorted_directions:
-            mm_result: MinimaxResult = minimax_alpha_beta_eval_all(
+            mm_result: MinimaxResult = alphabeta(
                 game_state,
                 depth,
+                ply,
+                pv_table,
                 is_maximizing_player=False,
                 alpha=alpha,
                 beta=beta,
@@ -158,6 +194,21 @@ def minimax_alpha_beta_eval_all(
             if mm_result.evaluation > max_eval:
                 max_eval = mm_result.evaluation
                 best_dir = direction
+
+                # PV bookkeeping
+                pv_table.set_move_pair(depth, ply, MovePair(maximizing_player_move=best_dir, minimizing_player_move=mm_result.principal_variation))
+
+                # copy the rest of the line from the child
+                # TODO: Maybe make this a PvTable method
+                if depth > 1:
+                    for next_ply in range(ply+1, pv_table.max_depth):
+
+                        child_move_pair = pv_table.get_move_pair(depth - 1, next_ply)
+
+                        if child_move_pair is None:
+                            break
+                        else:
+                            pv_table.set_move_pair(depth, next_ply, child_move_pair)
 
             alpha = max(alpha, mm_result.evaluation)
             if beta <= alpha:
@@ -211,9 +262,19 @@ def minimax_alpha_beta_eval_all(
                 )
 
         # Ascending order (for minimizing player, lowest evaluations are most promising)
-        sorted_possible_directions, sorted_child_states = zip(
+        sorted_directions, sorted_child_states = zip(
             *sorted(zip(possible_directions, child_states), key=sort_possibilities)
         )
+
+        sorted_directions = list(sorted_directions)
+        # Explore PV first if we have it
+        pv = pv_table.get_move_pair(depth, ply)
+
+        if pv is not None:
+            if pv.minimizing_player_move in sorted_directions:
+                sorted_directions.remove(pv.minimizing_player_move)
+                sorted_directions.insert(0, pv.minimizing_player_move)
+            
 
         # sorted_child_states = sorted(
         #     child_states,
@@ -224,10 +285,12 @@ def minimax_alpha_beta_eval_all(
 
         min_eval = float("inf")
 
-        for direction, child_state in zip(sorted_possible_directions, sorted_child_states):
-            mm_result: MinimaxResult = minimax_alpha_beta_eval_all(
+        for direction, child_state in zip(sorted_directions, sorted_child_states):
+            mm_result: MinimaxResult = alphabeta(
                 child_state,
                 depth - 1,
+                ply + 1,
+                pv_table,
                 is_maximizing_player=True,
                 alpha=alpha,
                 beta=beta,
@@ -246,102 +309,19 @@ def minimax_alpha_beta_eval_all(
         return MinimaxResult(min_eval, best_dir)
 
 
-# TODO: Fix not handling ties correctly
-def basic_minimax(
-    game_state: GameState,
-    depth,
-    is_maximizing_player: bool,
-    maximizing_player_move: Direction = None,
-    context: MinimaxContext = None,
-) -> MinimaxResult:
-    
-    assert context is not None, "Context must be passed"
-
-    if is_maximizing_player:
-        assert maximizing_player_move is None
-    else:
-        assert maximizing_player_move is not None
-
-    maximizing_player = context.maximizing_player
-    minimizing_player = context.minimizing_player
-    
-
-    status_info: StatusInfo = tron.get_status(game_state)
-
-    if status_info.status != GameStatus.IN_PROGRESS:
-        assert is_maximizing_player
 
 
-    if status_info.status == GameStatus.TIE:
-        return MinimaxResult(0.0, None)
-    elif status_info.status == GameStatus.WINNER:
+def iter_deepening_ab(root_game_state, max_depth: int, mm_context: MinimaxContext):
 
-        eval_magnitude = 15.0 * (depth + 1)
-        
-        eval = eval_magnitude if status_info.winner_index == maximizing_player else eval_magnitude * -1 
-        return MinimaxResult(eval, None)
+    pv_table = PvTable(max_depth)
 
+    # Utilize PV moves before the rest
+    for depth in range(1, max_depth+1):
 
+        mm_result = alphabeta(root_game_state, depth, ply=0, pv_table=pv_table, is_maximizing_player=True, context=mm_context)
 
-    if depth == 0:
-        assert is_maximizing_player
-        return MinimaxResult(lru_eval(context.model, game_state, maximizing_player), None)
+    if mm_result.principal_variation is not None:
+        assert mm_result.principal_variation == pv_table.get_move_pair(max_depth, 0).maximizing_player_move
 
-    if is_maximizing_player:
-
-        possible_directions = tron.get_possible_directions(
-            game_state, maximizing_player
-        )
-
-        possible_directions = possible_directions if len(possible_directions) > 0 else [Direction.UP]
-
-        max_eval = -float("inf")
-
-        
-        for direction in possible_directions:
-            mm_result = basic_minimax(
-                game_state,
-                depth,
-                is_maximizing_player=False,
-                maximizing_player_move=direction,
-                context=context
-            )
-
-            if mm_result.evaluation > max_eval:
-                max_eval = mm_result.evaluation
-                best_dir = direction
-        return MinimaxResult(max_eval, best_dir)
-    else:
-
-        possible_directions = tron.get_possible_directions(
-            game_state, minimizing_player
-        )
-        possible_directions = possible_directions if len(possible_directions) > 0 else [Direction.UP]
-
-        min_eval = float("inf")
-        for direction in possible_directions:
-            
-            directions = [None, None]
-            directions[maximizing_player] = maximizing_player_move
-            directions[minimizing_player] = direction
-
-
-            child_state = tron.next(
-                game_state,
-                directions=tuple(directions)
-            )
-
-            mm_result = basic_minimax(
-                child_state,
-                depth - 1,
-                is_maximizing_player=True,
-                context=context
-            )
-
-            if mm_result.evaluation < min_eval:
-                min_eval = mm_result.evaluation
-                best_dir = direction
-
-        return MinimaxResult(min_eval, best_dir)
-
+    return mm_result
 

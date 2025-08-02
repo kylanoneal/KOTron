@@ -1,4 +1,5 @@
 import torch
+import random
 import numpy as np
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -30,7 +31,20 @@ class RandomTronModel(TronModel):
         raise NotImplementedError()
     
     def run_inference(self, hero_game_states: list[HeroGameState]) -> np.ndarray:
-        return np.random.uniform(-1.0, 1.0, size=len(hero_game_states))
+
+        evals = []
+
+        for hero_game_state in hero_game_states:
+            hash_tup = (hero_game_state.game_state, hero_game_state.hero_index)
+
+            # seed = int(hash(hash_tup))
+            # rng = random.Random(seed)
+            #evals.append(rng.uniform(-10.0, 10.0))
+
+            rng = random.Random()
+            evals.append(rng.normalvariate(0, 1))
+
+        return np.array(evals)
     
 
 
