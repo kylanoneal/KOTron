@@ -102,6 +102,10 @@ def search(model: TronModel, game_state, hero_index, n_iterations, exploration_f
     if root is None:
         root = Node(game_state, hero_index, is_hero=False, prev_move=None, eval=0.0)
 
+    else:
+        root.parent = None
+
+
     def find_best_leaf(node) -> Node:
         while len(node.children) > 0:
             _, node = select(node)
@@ -241,8 +245,12 @@ def softmax_sample(visits: list[int], temp: float = 1.0) -> int:
     temp  > 1.0  → flatter distribution (more exploration)  
     temp  < 1.0  → sharper distribution (more greedy)
     """
-    if temp <= 0:
-        raise ValueError("Temperature T must be positive.")
+    if temp < 0:
+        raise ValueError("Temperature must be non-negative")
+    
+    if temp == 0:
+        
+        return visits.index(max(visits))  
 
     # numerically stable soft-max
     # max_logit = max(logits)
