@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import tron
 from tron.game import  GameState, StatusInfo, GameStatus, Direction
 
-from tron.ai.tron_model import TronModel, HeroGameState
+from tron.ai.tron_model import TronModel, PovGameState
 
 @dataclass
 class MovePair:
@@ -66,7 +66,7 @@ cache = LRUCache(maxsize=20000000)
 
 @cached(cache)
 def lru_eval(model: TronModel, game, player_index):
-    return model.run_inference([HeroGameState(game, player_index)])[0]
+    return model.run_inference([PovGameState(game, player_index)])[0]
 
 
 @dataclass

@@ -7,7 +7,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from tron import GameState, Player
-from tron.ai.training import HeroGameState
+from tron.ai.training import PovGameState
 
 
 class TronModel(nn.Module, ABC):
@@ -77,7 +77,7 @@ class NnueTronModel(TronModel):
 
         hero_index = 0
 
-        active_indices = self.get_active_indices(HeroGameState(game_state, hero_index))
+        active_indices = self.get_active_indices(PovGameState(game_state, hero_index))
 
         self.acc = self.init_accumulator(active_indices)
         self.prev_game_state = game_state
@@ -92,23 +92,23 @@ class NnueTronModel(TronModel):
         return (self.num_cells * 2) + (row * self.num_cols + col)
 
 
-    def run_inference(self, hero_game_states: list[HeroGameState]) -> np.ndarray:
+    def run_inference(self, pov_game_states: list[PovGameState]) -> np.ndarray:
         with torch.no_grad():
             evals = []
 
-            for hero_game_state in hero_game_states:
+            for pov_game_state in pov_game_states:
 
-                if len(hero_game_state.game_state.players) != 2:
+                if len(pov_game_state.game_state.players) != 2:
                     raise NotImplementedError()
                 
-                num_rows, num_cols = hero_game_state.game_state.grid.shape
+                num_rows, num_cols = pov_game_state.game_state.grid.shape
 
                 assert num_rows == self.num_rows
                 assert num_cols == self.num_cols
                 
-                hero_index = hero_game_state.hero_index
+                hero_index = pov_game_state.hero_index
                 opponent_index = 0 if hero_index == 1 else 1
-                game_state = hero_game_state.game_state
+                game_state = pov_game_state.game_state
 
                 remove_mask = self.prev_game_state.grid & (~game_state.grid)
                 add_mask = game_state.grid & (~self.prev_game_state.grid)
@@ -151,14 +151,14 @@ class NnueTronModel(TronModel):
         return np.array(evals)
 
 
-    def get_active_indices(self, hero_game_state: HeroGameState) -> list[int]:
+    def get_active_indices(self, pov_game_state: PovGameState) -> list[int]:
 
-        if len(hero_game_state.game_state.players) != 2:
+        if len(pov_game_state.game_state.players) != 2:
             raise NotImplementedError()
         
-        hero_index = hero_game_state.hero_index
+        hero_index = pov_game_state.hero_index
         opponent_index = 0 if hero_index == 1 else 1
-        game_state = hero_game_state.game_state
+        game_state = pov_game_state.game_state
 
         num_rows, num_cols = game_state.grid.shape
 
@@ -182,14 +182,14 @@ class NnueTronModel(TronModel):
         return indices
 
     def get_model_input(
-        self, hero_game_states: list[HeroGameState]
+        self, pov_game_states: list[PovGameState]
     ) -> torch.Tensor:
 
         accs = []
         
-        for hero_game_state in hero_game_states:
+        for pov_game_state in pov_game_states:
 
-            active_indices = self.get_active_indices(hero_game_state)
+            active_indices = self.get_active_indices(pov_game_state)
 
             accs.append(self.init_accumulator(active_indices))
 

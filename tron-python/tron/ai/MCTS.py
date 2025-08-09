@@ -5,9 +5,9 @@ from tqdm import tqdm
 from copy import deepcopy
 
 
-from tron.ai.tron_model import TronModel, HeroGameState
+from tron.ai.tron_model import TronModel, PovGameState
 from tron.game import GameState, Direction, GameStatus, get_possible_directions, next, get_status
-from tron.ai.minimax import basic_minimax, MinimaxContext, MinimaxResult, lru_eval, cache
+from tron.ai.minimax import basic_minimax, MinimaxContext, MinimaxResult
 from tron.ai.algos import choose_direction_random
 
 class Node:
@@ -91,13 +91,13 @@ def eval_mcts(game_state: GameState, is_hero: bool, mm_context: MinimaxContext, 
     return eval
 
 
-def search(model: TronModel, game_state, hero_index, n_iterations, exploration_factor=2, root=None):
+def search(inference_fn: callable, game_state, hero_index, n_iterations, exploration_factor=2, root=None):
 
     if len(game_state.players) != 2:
         raise NotImplementedError()
     
     opponent_index = 0 if hero_index == 1 else 1
-    mm_context = MinimaxContext(model, maximizing_player=hero_index, minimizing_player=opponent_index)
+    mm_context = MinimaxContext(inference_fn, maximizing_player=hero_index, minimizing_player=opponent_index, win_magnitude=2.0)
 
     if root is None:
         root = Node(game_state, hero_index, is_hero=False, prev_move=None, eval=0.0)
@@ -177,7 +177,7 @@ def search(model: TronModel, game_state, hero_index, n_iterations, exploration_f
 
 
     for _ in range(root.n_visits, n_iterations):
-        root.n_visits += 1
+
         leaf = find_best_leaf(root)
 
         if not leaf.is_expanded:

@@ -5,9 +5,9 @@ from cachetools import LRUCache, cached
 from dataclasses import dataclass
 
 import tron
-from tron.game import  GameState, StatusInfo, GameStatus, Direction
+from tron.game import GameState, StatusInfo, GameStatus, Direction
 
-from tron.ai.tron_model import TronModel, HeroGameState
+from tron.ai.tron_model import TronModel, PovGameState
 
 
 # TODO: Change args to player pos, opponent pos, direction?
@@ -35,17 +35,6 @@ def heuristic_towards_opponent(
     return -1.0
 
 
-# TODO: This should probably be in different spot
-# Initialize an LRU cache with 20 mil max size
-cache = LRUCache(maxsize=20000000)
-
-
-
-@cached(cache)
-def lru_eval(model: TronModel, game, player_index):
-    return model.run_inference([HeroGameState(game, player_index)])[0]
-
-
 @dataclass
 class MinimaxDebugState:
     game_state: GameState
@@ -68,9 +57,10 @@ class MinimaxResult:
 
 @dataclass
 class MinimaxContext:
-    model: TronModel
+    eval_fn: callable
     maximizing_player: int
     minimizing_player: int
+    win_magnitude: float
     debug_mode: bool = False
 
 
@@ -108,9 +98,10 @@ def minimax_alpha_beta_eval_all(
     elif status_info.status == GameStatus.WINNER:
         raise RuntimeError("Winning terminal state should never be reached here.")
 
-
     if depth == 0:
-        return MinimaxResult(lru_eval(context.model, game_state, maximizing_player), None)
+        return MinimaxResult(
+            lru_eval(context.model, game_state, maximizing_player), None
+        )
 
     if is_maximizing_player:
 
@@ -173,8 +164,6 @@ def minimax_alpha_beta_eval_all(
         if len(possible_directions) == 0:
             return MinimaxResult(1000.0 * depth, None)
 
-
-
         child_states = []
 
         for direction in possible_directions:
@@ -183,11 +172,12 @@ def minimax_alpha_beta_eval_all(
             directions[maximizing_player] = maximizing_player_move
             directions[minimizing_player] = direction
 
-            child_states.append(tron.next(
-                game_state,
-                directions,
-            ))
-
+            child_states.append(
+                tron.next(
+                    game_state,
+                    directions,
+                )
+            )
 
         # # Sort child states by eval if cached, else use heuristic
         def sort_possibilities(dir_state_tup: tuple[Direction, GameState]):
@@ -224,7 +214,9 @@ def minimax_alpha_beta_eval_all(
 
         min_eval = float("inf")
 
-        for direction, child_state in zip(sorted_possible_directions, sorted_child_states):
+        for direction, child_state in zip(
+            sorted_possible_directions, sorted_child_states
+        ):
             mm_result: MinimaxResult = minimax_alpha_beta_eval_all(
                 child_state,
                 depth - 1,
@@ -254,7 +246,7 @@ def basic_minimax(
     maximizing_player_move: Direction = None,
     context: MinimaxContext = None,
 ) -> MinimaxResult:
-    
+
     assert context is not None, "Context must be passed"
 
     if is_maximizing_player:
@@ -264,28 +256,30 @@ def basic_minimax(
 
     maximizing_player = context.maximizing_player
     minimizing_player = context.minimizing_player
-    
 
     status_info: StatusInfo = tron.get_status(game_state)
 
     if status_info.status != GameStatus.IN_PROGRESS:
         assert is_maximizing_player
 
-
     if status_info.status == GameStatus.TIE:
         return MinimaxResult(0.0, None)
     elif status_info.status == GameStatus.WINNER:
 
-        eval_magnitude = 15.0 * (depth + 1)
-        
-        eval = eval_magnitude if status_info.winner_index == maximizing_player else eval_magnitude * -1 
+        eval_magnitude = context.win_magnitude * (depth + 1)
+
+        eval = (
+            eval_magnitude
+            if status_info.winner_index == maximizing_player
+            else eval_magnitude * -1
+        )
         return MinimaxResult(eval, None)
-
-
 
     if depth == 0:
         assert is_maximizing_player
-        return MinimaxResult(lru_eval(context.model, game_state, maximizing_player), None)
+        return MinimaxResult(
+            context.eval_fn(PovGameState(game_state, maximizing_player)), None
+        )
 
     if is_maximizing_player:
 
@@ -293,18 +287,19 @@ def basic_minimax(
             game_state, maximizing_player
         )
 
-        possible_directions = possible_directions if len(possible_directions) > 0 else [Direction.UP]
+        possible_directions = (
+            possible_directions if len(possible_directions) > 0 else [Direction.UP]
+        )
 
         max_eval = -float("inf")
 
-        
         for direction in possible_directions:
             mm_result = basic_minimax(
                 game_state,
                 depth,
                 is_maximizing_player=False,
                 maximizing_player_move=direction,
-                context=context
+                context=context,
             )
 
             if mm_result.evaluation > max_eval:
@@ -316,26 +311,21 @@ def basic_minimax(
         possible_directions = tron.get_possible_directions(
             game_state, minimizing_player
         )
-        possible_directions = possible_directions if len(possible_directions) > 0 else [Direction.UP]
+        possible_directions = (
+            possible_directions if len(possible_directions) > 0 else [Direction.UP]
+        )
 
         min_eval = float("inf")
         for direction in possible_directions:
-            
+
             directions = [None, None]
             directions[maximizing_player] = maximizing_player_move
             directions[minimizing_player] = direction
 
-
-            child_state = tron.next(
-                game_state,
-                directions=tuple(directions)
-            )
+            child_state = tron.next(game_state, directions=tuple(directions))
 
             mm_result = basic_minimax(
-                child_state,
-                depth - 1,
-                is_maximizing_player=True,
-                context=context
+                child_state, depth - 1, is_maximizing_player=True, context=context
             )
 
             if mm_result.evaluation < min_eval:
@@ -343,5 +333,3 @@ def basic_minimax(
                 best_dir = direction
 
         return MinimaxResult(min_eval, best_dir)
-
-

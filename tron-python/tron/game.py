@@ -27,6 +27,51 @@ class Direction(Enum):
     def get_random_direction() -> "Direction":
         return random.choice(list(Direction))
 
+    @staticmethod
+    def fliplr(direction: "Direction") -> "Direction":
+
+        if direction in [Direction.UP, Direction.DOWN]:
+            return direction
+        elif direction == Direction.LEFT:
+            return Direction.RIGHT
+        elif direction == Direction.RIGHT:
+            return Direction.LEFT
+        else:
+            raise ValueError(f"Unexpected direction: {direction}")
+
+    @staticmethod
+    def rot90_counterclockwise(direction: "Direction") -> "Direction":
+
+        if direction == Direction.UP:
+            return Direction.LEFT
+        elif direction == Direction.LEFT:
+            return Direction.DOWN
+        elif direction == Direction.DOWN:
+            return Direction.RIGHT
+        elif direction == Direction.RIGHT:
+            return Direction.UP
+        else:
+            raise ValueError(f"Unexpected direction: {direction}")
+
+    def transform(
+        directions: list["Direction"],
+        do_lr_flip: bool,
+        n_rot_90: int,
+    ) -> list["Direction"]:
+
+        transformed_dirs = directions.copy()
+
+        if do_lr_flip:
+            transformed_dirs = [Direction.fliplr(d) for d in transformed_dirs]
+
+        for _ in range(n_rot_90):
+            transformed_dirs = [
+                Direction.rot90_counterclockwise(d) for d in transformed_dirs
+            ]
+
+        return transformed_dirs
+
+
 @dataclass(frozen=True)
 class Player:
 
@@ -44,16 +89,13 @@ class Player:
         )
 
     def __hash__(self):
-        return hash(
-            (hash(self.row), hash(self.col), hash(self.can_move))
-        )
+        return hash((hash(self.row), hash(self.col), hash(self.can_move)))
 
 
 @dataclass(frozen=True)
 class GameState:
     grid: np.ndarray[bool]
     players: tuple[Player]
-
 
     def __post_init__(self):
         # 1. Validate players container
@@ -69,9 +111,7 @@ class GameState:
                 f"grid must be a numpy.ndarray, got {type(self.grid).__name__}"
             )
         if self.grid.dtype != bool:
-            raise TypeError(
-                f"grid.dtype must be bool, got {self.grid.dtype}"
-            )
+            raise TypeError(f"grid.dtype must be bool, got {self.grid.dtype}")
         if self.grid.ndim != 2:
             raise ValueError(
                 f"grid must be 2-dimensional, got {self.grid.ndim} dimensions"
@@ -106,7 +146,6 @@ class GameState:
                     f"grid at position ({player.row}, {player.col}) "
                     f"must be True for a player head"
                 )
-            
 
             for j in range(idx + 1, len(self.players)):
                 pj: Player = self.players[j]
@@ -115,7 +154,10 @@ class GameState:
                     if player.can_move or pj.can_move:
                         raise ValueError("Active players occupying same square")
 
-
+        if len(self.players) != 2:
+            raise NotImplementedError()
+        
+        
     def __str__(self):
 
         repr_str = ""
@@ -130,19 +172,15 @@ class GameState:
             repr_str += f"Player {i + 1}: ({player.row}, {player.col})"
 
         return repr_str
-    
+
     def __eq__(self, other):
         if not isinstance(other, GameState):
             return False
-        return (
-            np.array_equal(self.grid, other.grid)
-            and self.players == other.players
-        )
+        return np.array_equal(self.grid, other.grid) and self.players == other.players
 
     def __hash__(self):
 
         return hash((self.grid.tobytes(), self.players))
-
 
     @staticmethod
     def new_game(
@@ -151,15 +189,15 @@ class GameState:
         num_cols: int = 10,
         random_starts: bool = False,
         neutral_starts: bool = False,
-        obstacle_density: float = 0.0
-    ) -> 'GameState':
+        obstacle_density: float = 0.0,
+    ) -> "GameState":
         """
         Init game without pre-initialized players.
         """
 
         if obstacle_density > 0.8:
             raise ValueError("Too many obstacles.")
-        
+
         if num_rows * num_cols < num_players:
             raise ValueError("Too many players for grid size.")
 
@@ -168,26 +206,34 @@ class GameState:
         if obstacle_density > 0.0:
             # Calculate the total number of True values based on density
             num_obstacles = int(num_rows * num_cols * obstacle_density)
-            
+
             # Randomly select indices to set to True
-            true_indices = np.random.choice(num_rows * num_cols, num_obstacles, replace=False)
-            
+            true_indices = np.random.choice(
+                num_rows * num_cols, num_obstacles, replace=False
+            )
+
             # Convert flat indices to row, column coordinates and set corresponding cells to True
             grid.ravel()[true_indices] = True
 
-
         if random_starts and not neutral_starts:
 
-            random_starts_flat = np.random.choice(num_rows * num_cols, size=num_players, replace=False)
+            random_starts_flat = np.random.choice(
+                num_rows * num_cols, size=num_players, replace=False
+            )
             random_rows, random_cols = np.unravel_index(random_starts_flat, grid.shape)
-                
-            players = tuple([Player(row, col, can_move=True) for row, col in zip(random_rows, random_cols)])
+
+            players = tuple(
+                [
+                    Player(row, col, can_move=True)
+                    for row, col in zip(random_rows, random_cols)
+                ]
+            )
 
         elif random_starts and neutral_starts:
             # Neutral start (symmetric over horizontal, vertical, or diagonal axis)
             if num_players != 2:
                 raise NotImplementedError()
-        
+
             retries = 200
             for _ in range(retries):
                 rand_row = random.randrange(0, num_rows)
@@ -196,10 +242,9 @@ class GameState:
                 rot_grid = np.zeros_like(grid)
                 rot_grid[rand_row][rand_col] = True
 
-
                 do_flip = random.random() > 0.5
                 rot_grid = np.fliplr(rot_grid) if do_flip else rot_grid
-                
+
                 n_rot_90 = random.randrange(0, 4) if do_flip else random.randrange(1, 4)
                 rot_grid = np.rot90(rot_grid, k=n_rot_90)
 
@@ -210,8 +255,11 @@ class GameState:
 
             else:
                 raise RuntimeError(f"Neutral start not found after {retries}.")
-            
-            players = (Player(rand_row, rand_col, can_move=True), Player(oppo_row, oppo_col, can_move=True))
+
+            players = (
+                Player(rand_row, rand_col, can_move=True),
+                Player(oppo_row, oppo_col, can_move=True),
+            )
 
         else:
             # Default starts
@@ -223,9 +271,9 @@ class GameState:
         assert type(players) == tuple
         assert len(players) == num_players
         return GameState(grid, players)
-    
+
     @staticmethod
-    def from_players(players: tuple[Player], num_rows=10, num_cols=10) -> 'GameState':
+    def from_players(players: tuple[Player], num_rows=10, num_cols=10) -> "GameState":
         """
         Create game with pre-initialized players.
         """
@@ -249,8 +297,39 @@ class GameState:
         for player in players:
             grid[player.row, player.col] = True
 
-
         return GameState(grid, players)
+
+    @staticmethod
+    def transform(
+        game_state: "GameState",
+        do_lr_flip: bool,
+        n_rot_90: int,
+    ) -> "GameState":
+
+        grid = game_state.grid.copy()
+        player_grid = np.zeros_like(grid, dtype=np.uint8)
+
+        for i, player in enumerate(game_state.players):
+            player_grid[player.row][player.col] = i + 1
+
+        if do_lr_flip:
+
+            grid = np.fliplr(grid)
+            player_grid = np.fliplr(player_grid)
+
+        grid = np.rot90(grid, k=n_rot_90)
+        player_grid = np.rot90(player_grid, k=n_rot_90)
+
+        transformed_players = []
+
+        for i, player in enumerate(game_state.players):
+            ind = np.argwhere(player_grid == i + 1)
+            assert len(ind) == 1 and len(ind[0]) == 2
+            row, col = ind[0]
+
+            transformed_players.append(Player(row, col, player.can_move))
+
+        return GameState(grid, tuple(transformed_players))
 
 
 class GameStatus(Enum):
@@ -258,6 +337,7 @@ class GameStatus(Enum):
     IN_PROGRESS = auto()
     TIE = auto()
     WINNER = auto()
+
 
 @dataclass
 class StatusInfo:
@@ -281,7 +361,8 @@ def get_status(game: GameState) -> StatusInfo:
         return StatusInfo(GameStatus.WINNER, winner_index)
     else:
         return StatusInfo(GameStatus.IN_PROGRESS)
-    
+
+
 def in_bounds(grid: np.ndarray, row: int, col: int):
     return 0 <= row < grid.shape[0] and 0 <= col < grid.shape[1]
 
@@ -295,10 +376,7 @@ def get_possible_directions(game: GameState, player_index):
         dr, dc = dir.value
         new_row, new_col = player.row + dr, player.col + dc
 
-        if (
-            in_bounds(game.grid, new_row, new_col)
-            and not game.grid[new_row][new_col]
-        ):
+        if in_bounds(game.grid, new_row, new_col) and not game.grid[new_row][new_col]:
             available_directions.append(dir)
 
     return available_directions
@@ -402,8 +480,3 @@ def next(game: GameState, directions: tuple[Direction]) -> GameState:
 #     next_game_state.status = GameState.get_status(next_game_state.players)
 
 #     return next_game_state
-
-
-
-
-

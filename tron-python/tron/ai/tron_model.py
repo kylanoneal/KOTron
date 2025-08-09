@@ -1,4 +1,6 @@
 import torch
+from torch import nn
+import torch.nn.functional as F
 import random
 import numpy as np
 from abc import ABC, abstractmethod
@@ -8,34 +10,42 @@ from tron.game import GameState, Player
 
 
 @dataclass
-class HeroGameState:
+class PovGameState:
     game_state: GameState
     hero_index: int
 
+    def __eq__(self, other):
+        if not isinstance(other, PovGameState):
+            return False
+        return self.hero_index == other.hero_index and self.game_state == other.game_state
+
+    def __hash__(self):
+
+        return hash((self.game_state, self.hero_index))
 
 class TronModel(torch.nn.Module, ABC):
 
     @abstractmethod
     def get_model_input(
-        self, hero_game_states: list[HeroGameState]
+        self, pov_game_states: list[PovGameState]
     ) -> torch.Tensor:
         pass
 
 
     @abstractmethod
-    def run_inference(self, hero_game_states: list[HeroGameState]) -> np.ndarray:
+    def run_inference(self, pov_game_state: PovGameState) -> float:
         pass
 
 class RandomTronModel(TronModel):
-    def get_model_input(self, hero_game_states: list[HeroGameState]):
+    def get_model_input(self, pov_game_states: list[PovGameState]):
         raise NotImplementedError()
     
-    def run_inference(self, hero_game_states: list[HeroGameState]) -> np.ndarray:
+    def run_inference(self, pov_game_states: list[PovGameState]) -> np.ndarray:
 
         evals = []
 
-        for hero_game_state in hero_game_states:
-            hash_tup = (hero_game_state.game_state, hero_game_state.hero_index)
+        for pov_game_state in pov_game_states:
+            hash_tup = (pov_game_state.game_state, pov_game_state.hero_index)
 
             # seed = int(hash(hash_tup))
             # rng = random.Random(seed)
@@ -47,209 +57,92 @@ class RandomTronModel(TronModel):
         return np.array(evals)
     
 
+class CnnTronModel(TronModel):
 
-# class NnueTronModel(TronModelAbstract):
-#     def __init__(self, num_rows, num_cols, device, torch_model):
+    PADDING = 1
 
-#         self.num_rows = num_rows
-#         self.num_cols = num_cols
-#         self.num_cells = num_rows * num_cols
-#         self.device = device
-#         self.torch_model = torch_model
-#         self.reset_acc()
+    def __init__(self, num_rows, num_cols):
+
+        assert num_rows == num_cols
+        self.num_rows = num_rows
+        self.num_cols = num_cols
+
+        # FIX PADDING TO BE IMPLICIT HERE
+        super(CnnTronModel, self).__init__()
+        self.conv1 = nn.Conv2d(
+            3, 10, kernel_size=3, stride=1, padding=0
+        )  # changed stride to 2
+        self.conv2 = nn.Conv2d(
+            10, 20, kernel_size=3, stride=1, padding=1
+        )  # changed stride to 2
+        output_dim1 = self.conv_output_size(num_rows, 3, 1, 1)  # after first conv layer
+        output_dim2 = self.conv_output_size(
+            output_dim1, 3, 1, 1
+        )  # after second conv layer
+        self.fc1 = nn.Linear(20 * output_dim2**2, 128)  # input features for fc1
+        self.fc_value = nn.Linear(128, 1)
+
+    @staticmethod
+    def conv_output_size(input_size, kernel_size, padding, stride):
+        return ((input_size - kernel_size + 2 * padding) // stride) + 1
+
+    def forward(self, x):
+        padded_game_grid = F.pad(
+            x[:, 0:1], pad=(1, 1, 1, 1), mode="constant", value=1.0
+        )
+        padded_heads = F.pad(x[:, 1:], pad=(1, 1, 1, 1), mode="constant", value=0.0)
+        concat = torch.concat((padded_game_grid, padded_heads), dim=1)
 
 
-#     def reset_acc(self):
-#         p1 = Player(0, 0, True)
-#         p2 = Player(1,1, True)
+        x = F.relu(self.conv1(concat))
+        x = F.relu(self.conv2(x))
+        x = torch.flatten(x, 1)  # flatten the tensor
+
+        x = F.leaky_relu(self.fc1(x))
         
-#         # NOTE: Sketch
-#         self.prev_game_state = GameState.from_players((p1, p2), num_rows=self.num_rows, num_cols=self.num_cols)
-#         self.prev_hero_index = 0
+        value_estimate = self.fc_value(x).squeeze(1)
 
-#         active_indices = [self.emb_idx_wall(0,0), self.emb_idx_wall(1,1), self.emb_idx_hero_head(0,0), self.emb_idx_opponent_head(1,1)]
-#         active_indices = torch.tensor(active_indices, dtype=torch.long).to(self.device)
-
-#         self.acc = self.torch_model.init_accumulator(active_indices)
-
-
-
-#     def emb_idx_wall(self, row, col):
-#         return row * self.num_cols + col
-#     def emb_idx_hero_head(self, row, col):
-#         return (self.num_cells) + (row * self.num_cols + col)
-#     def emb_idx_opponent_head(self, row, col):
-#         return (self.num_cells * 2) + (row * self.num_cols + col)
-
-
-#     def run_inference(self, game_states: list[GameState], hero_index: int) -> np.ndarray:
-
-#         # 1. Compute indices to add/remove
-#         # 2. Update self.acc
-#         # 3. Update last game state
-#         # 4. Forward pass with self.acc
-
-#         # To expand to batch inference, sequentially do the above
-
-#         evals = []
-
-#         for game_state in game_states:
-
-
-#             remove_mask = self.prev_game_state.grid & (~game_state.grid)
-#             add_mask = game_state.grid & (~self.prev_game_state.grid)
-
-#             # get row/col pairs for each case
-#             remove_grid_indices = np.argwhere(remove_mask).tolist()
-#             add_grid_indices = np.argwhere(add_mask).tolist()
-
-#             # get emb 
-#             remove_emb_indices = [self.emb_idx_wall(row, col) for row, col in remove_grid_indices]
-#             add_emb_indices = [self.emb_idx_wall(row, col) for row, col in add_grid_indices]
-
-#             # Previous state's player heads
-#             prev_hero_player = self.prev_game_state.players[self.prev_hero_index]
-#             prev_hero_emb_index = self.emb_idx_hero_head(prev_hero_player.row, prev_hero_player.col)
-
-#             prev_opponent_index = 0 if self.prev_hero_index == 1 else 1
-#             prev_opponent_player = self.prev_game_state.players[prev_opponent_index]
-#             prev_opponent_emb_index = self.emb_idx_opponent_head(prev_opponent_player.row, prev_opponent_player.col)
-
-#             remove_emb_indices.extend([prev_hero_emb_index, prev_opponent_emb_index])
-#             # Current state's player heads
-
-#             hero_player = game_state.players[hero_index]
-#             hero_emb_index = self.emb_idx_hero_head(hero_player.row, hero_player.col)
-
-#             opponent_index = 0 if hero_index == 1 else 1
-#             opponent_player = game_state.players[opponent_index]
-#             opponent_emb_index = self.emb_idx_opponent_head(opponent_player.row, opponent_player.col)
-
-#             add_emb_indices.extend([hero_emb_index, opponent_emb_index])
-
-#             # Update accumulator and prev variables
-#             self.acc = self.torch_model.update_acc(self.acc, remove_emb_indices, add_emb_indices)
-
-#             evals.append(self.torch_model(self.acc).item())
-
-#             self.prev_game_state = game_state
-#             self.prev_hero_index = hero_index
-
-#         return np.array(evals)
-
-#         # evals = []
-#         # for game_state in game_states:
-#         #     if len(game_state.players) > 2:
-#         #         raise NotImplementedError()
-
-#         #     num_rows, num_cols = game_state.grid.shape
-
-#         #     assert num_rows == self.num_rows
-#         #     assert num_cols == self.num_cols
-
-#         #     hero_player = game_state.players[hero_index]
-#         #     hero_emb_index = self.emb_idx_hero_head(hero_player.row, hero_player.col)
-
-#         #     opponent_index = 0 if hero_index == 1 else 1
-#         #     opponent_player = game_state.players[opponent_index]
-#         #     opponent_emb_index = self.emb_idx_opponent_head(opponent_player.row, opponent_player.col)
-
-#         #     indices = [hero_emb_index, opponent_emb_index]
-
-#         #     for row in range(num_rows):
-#         #         for col in range(num_cols):
-
-#         #             if game_state.grid[row][col]:
-#         #                 indices.append(self.emb_idx_wall(row, col))
-            
-#         #     acc = self.torch_model.init_accumulator(torch.tensor(indices, dtype=torch.long))
-#         #     evals.append(self.torch_model(acc).item())
-
-
-#         # return np.array(evals)
-
-#     def get_model_input(
-#         self, game_states: list[GameState], hero_index: int
-#     ) -> torch.Tensor:
-
-#         accs = []
-        
-#         for game_state in game_states:
-#             if len(game_state.players) > 2:
-#                 raise NotImplementedError()
-
-#             num_rows, num_cols = game_state.grid.shape
-
-#             assert num_rows == self.num_rows
-#             assert num_cols == self.num_cols
-
-#             hero_player = game_state.players[hero_index]
-#             hero_emb_index = self.emb_idx_hero_head(hero_player.row, hero_player.col)
-
-#             opponent_index = 0 if hero_index == 1 else 1
-#             opponent_player = game_state.players[opponent_index]
-#             opponent_emb_index = self.emb_idx_opponent_head(opponent_player.row, opponent_player.col)
-
-#             indices = [hero_emb_index, opponent_emb_index]
-
-#             for row in range(num_rows):
-#                 for col in range(num_cols):
-
-#                     if game_state.grid[row][col]:
-#                         indices.append(self.emb_idx_wall(row, col))
-
-#             accs.append(self.torch_model.init_accumulator(torch.tensor(indices, dtype=torch.long).to(self.device)))
-
-#         return torch.stack(accs)
-    
-# class RandomTronModel(TronModelAbstract):
-
-#     def get_model_input(self, game_states, player_index):
-#         pass
-    
-#     def run_inference(self, game_states, player_index):
-#         return np.random.uniform(-1.0, 1.0, size=len(game_states))
+        return value_estimate
     
 
-# class CnnTronModel(TronModelAbstract):
-#     def __init__(self, model, device):
+    def get_model_input(
+        self, pov_game_states: list[PovGameState]
+    ) -> torch.Tensor:
 
-#         self.device = device
-#         self.model = model
+        bool_array = (
+            np.stack([h.game_state.grid for h in pov_game_states], axis=0)
+            .astype(np.float32)
+            .reshape((len(pov_game_states), 1, self.num_rows, self.num_cols))
+        )
 
-#     def get_model_input(
-#         self, game_states: list[GameState], player_index: int
-#     ) -> torch.Tensor:
+        pos_array = np.zeros((len(pov_game_states), 2, self.num_rows, self.num_cols))
 
-#         bool_array = (
-#             np.stack([game.grid for game in game_states], axis=0)
-#             .astype(np.float32)
-#             .reshape((len(game_states), 1, 10, 10))
-#         )
+        for i, pov_game_state in enumerate(pov_game_states):
 
-#         pos_array = np.zeros((len(game_states), 2, 10, 10))
+            game_state = pov_game_state.game_state
+            hero_index = pov_game_state.hero_index
+            opponent_index = 0 if hero_index == 1 else 1
 
-#         # NOTE: Assuming 2 players
-#         opponent_index = 1 if player_index == 0 else 0
+            pos_array[
+                i, 0, game_state.players[hero_index].row, game_state.players[hero_index].col
+            ] = 1.0
+            pos_array[
+                i, 1, game_state.players[opponent_index].row, game_state.players[opponent_index].col
+            ] = -1.0
 
-#         for i, game in enumerate(game_states):
+        combined_array = np.concatenate((bool_array, pos_array), axis=1)
 
-#             pos_array[
-#                 i, 0, game.players[player_index].row, game.players[player_index].col
-#             ] = 1.0
-#             pos_array[
-#                 i, 1, game.players[opponent_index].row, game.players[opponent_index].col
-#             ] = -1.0
+        tensor_output = torch.tensor(combined_array, dtype=torch.float32)
 
-#         combined_array = np.concatenate((bool_array, pos_array), axis=1)
-
-#         tensor_output = torch.tensor(combined_array, dtype=torch.float32).to(
-#             self.device
-#         )
-
-#         return tensor_output
+        return tensor_output
     
+    def run_inference(self, pov_game_state: PovGameState) -> np.ndarray:
 
+        model_input = self.get_model_input([pov_game_state])
+
+        output = self(model_input)
+
+        return output.detach().item()
 # class OneHotTransformerTronModel(TronModelAbstract):
 #     def __init__(self, model, device):
 
