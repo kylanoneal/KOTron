@@ -116,7 +116,7 @@ def main():
             init_model, game, 0, n_iterations=100,
         )
 
-        opin_root = MCTS.search(opinionated_model, game, 0, 5_000)
+        opin_root = MCTS.search(opinionated_model, game, 0, 1_000)
 
         p1_dir, p2_dir, _ = MCTS.get_move_pair(opin_root, 0, temp=0.0)
 

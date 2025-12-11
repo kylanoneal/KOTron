@@ -5,6 +5,7 @@ import torch
 import shutil
 import random
 import datetime
+import argparse
 from tqdm import tqdm
 from copy import deepcopy
 from pathlib import Path
@@ -48,6 +49,7 @@ from tron.io.to_proto import to_proto, from_proto
 class BenchmarkContext:
     dir_fn: callable
     description: str
+
 
 @dataclass
 class MatchContext:
@@ -121,26 +123,47 @@ def benchmark(i, tb_writer, model, bench_contexts, match_contexts):
 
 def main():
 
-    RUN_DESCRIPTION = "better_5x5_cnn_amsgrad_mcts500_temp0p7_8batchsize_0p5keeprate"
+    # parser = argparse.ArgumentParser()
+    # # parser.add_argument("--mcts_iters", type=int)
+    # # parser.add_argument("--temp", type=float)
+    # # parser.add_argument("--explr_factor", type=float)
+
+    # parser.add_argument("--lr", type=float)
+    # parser.add_argument("--batch_size", type=int)
+
+    # args = parser.parse_args()
+
+    BATCH_SIZE = 4
+    KEEP_RATE = 0.5
+    LR = 0.001
+
+    # MCTS_ITERS = args.mcts_iters
+    # TEMP = args.temp
+    # EXPLR_FACTOR = args.explr_factor
+
+    MCTS_ITERS = 2000
+    TEMP = 0.4 # 0.7
+    EXPLR_FACTOR = 2.0
+
+    RUN_DESCRIPTION = "mcts_cnn_5x5"
 
     NUM_ROWS = NUM_COLS = 5
 
-    SIM_GAME_DEPTH = 2
-    MCTS_ITERS = 500
-    TEMP = 0.7
+    # SIM_GAME_DEPTH = 2
+    WIN_REWARD = 1.5
+
     GAMES_PER_ITER = 256
     CHECKPOINT_EVERY_N = 10
 
-    P_NEUTRAL_START = 0.75
-    P_OBSTACLES = 0.4
+    P_NEUTRAL_START = 0.9 # 0.75
+    P_OBSTACLES = 0.2# 0.4
     OBSTACLE_DENSITY_RANGE = (0.0, 0.3)
 
+    TRAIN_ITERS = 500
     PLAY_MATCH_EVERY_N = 10
     N_MATCH_START_POSITIONS = 100
 
-    BATCH_SIZE = 8
-    KEEP_RATE = 0.5
-    LR = 0.001
+    RUN_UID = f"FINETUNELR{LR}_B{BATCH_SIZE}"
 
     ############################################
     # INITIALIZE MODELS
@@ -149,13 +172,13 @@ def main():
     # TODO: Train a model only on deep games as well?
     model = CnnTronModel(NUM_ROWS, NUM_COLS)
 
-    # state_dict = torch.load(
-    #     r"C:\Users\KylanO'Neal\Non-OneDrive Storage\code\my_repos\KOTron\tron-python\models\pretrain_mcts_5x5_v2_190.pth"
-    # )
-    # model.load_state_dict(state_dict, strict=True)
+    state_dict = torch.load(
+        r"C:\Users\kylan\Documents\code\repos\KOTron\tron-python\scripts\y2025\m08\cnn\runs\20250810-224509_mcts_cnn_5x5\LR0.001_B4\checkpoints\LR0.001_B4_30.pth"
+    )
+    model.load_state_dict(state_dict, strict=True)
 
     criterion = torch.nn.MSELoss()
-    optimizer = torch.optim.Adam(model.parameters(), amsgrad=True)
+    optimizer = torch.optim.Adam(model.parameters(), amsgrad=True, lr=LR)
 
     ############################################
     # TENSORBOARD AND MODEL CHECKPOINT SETUP
@@ -163,25 +186,28 @@ def main():
 
     current_script_path = Path(__file__).resolve()
 
-    outer_run_folder = current_script_path.parent / "runs"
-    outer_run_folder.mkdir(exist_ok=True)
+    outer_run_dir = current_script_path.parent / "runs"
+    outer_run_dir.mkdir(exist_ok=True)
 
-    run_folder = (
-        outer_run_folder
+    run_dir = (
+        outer_run_dir
         / f"{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}_{RUN_DESCRIPTION}"
     )
-    run_folder.mkdir()
+    run_dir.mkdir(exist_ok=True)
 
-    data_out_folder = run_folder / "game_data"
-    data_out_folder.mkdir()
+    uid_run_dir = run_dir / RUN_UID
+    uid_run_dir.mkdir(exist_ok=False)
 
-    checkpoints_folder = run_folder / "checkpoints"
-    checkpoints_folder.mkdir()
+    data_out_dir = uid_run_dir / "game_data"
+    data_out_dir.mkdir()
 
-    backup_path = run_folder / f"{current_script_path.name.split('.')[0]}.bak.py"
+    checkpoints_dir = uid_run_dir / "checkpoints"
+    checkpoints_dir.mkdir()
+
+    backup_path = uid_run_dir / f"{current_script_path.name.split('.')[0]}.bak.py"
     shutil.copy2(current_script_path, backup_path)
 
-    tb_writer = SummaryWriter(log_dir=run_folder)
+    tb_writer = SummaryWriter(log_dir=uid_run_dir)
 
     ############################################
     # BENCHMARKING SETUP
@@ -191,9 +217,13 @@ def main():
         pov_game_state: PovGameState, model: TronModel, depth: int
     ) -> Direction:
 
-
         opponent_index = 0 if pov_game_state.hero_index == 1 else 1
-        mm_context = MinimaxContext(model.run_inference, pov_game_state.hero_index, opponent_index, win_magnitude=100_000.0)
+        mm_context = MinimaxContext(
+            model.run_inference,
+            pov_game_state.hero_index,
+            opponent_index,
+            win_magnitude=100_000.0,
+        )
 
         mm_result = basic_minimax(
             pov_game_state.game_state,
@@ -218,6 +248,12 @@ def main():
 
     fresh_model = CnnTronModel(NUM_ROWS, NUM_COLS)
 
+    fresh_state_dict = torch.load(
+        r"C:\Users\kylan\Documents\code\repos\KOTron\tron-python\models\20250810_5x5_random_init.pth"
+    )
+    fresh_model.load_state_dict(fresh_state_dict, strict=True)
+
+
     fresh_model_benchmark_contexts = [
         fresh_model_d1_bc := BenchmarkContext(
             partial(_minimax_dir_fn, model=fresh_model, depth=1),
@@ -229,43 +265,49 @@ def main():
         ),
     ]
 
-    prev_model = CnnTronModel(NUM_ROWS, NUM_COLS)
+    # prev_model = CnnTronModel(NUM_ROWS, NUM_COLS)
 
-    prev_state_dict = torch.load(r"C:\Users\KylanO'Neal\Non-OneDrive Storage\code\my_repos\KOTron\tron-python\scripts\y2025\m08\cnn\runs\20250808-164733_better_5x5_cnn_amsgrad_d2sims_8batchsize_0p15keeprate\checkpoints\better_5x5_cnn_amsgrad_d2sims_8batchsize_0p15keeprate_500.pth")
-    prev_model.load_state_dict(prev_state_dict, True)
+    # prev_state_dict = torch.load(
+    #     r"C:\Users\KylanO'Neal\Non-OneDrive Storage\code\my_repos\KOTron\tron-python\scripts\y2025\m08\cnn\runs\20250808-164733_better_5x5_cnn_amsgrad_d2sims_8batchsize_0p15keeprate\checkpoints\better_5x5_cnn_amsgrad_d2sims_8batchsize_0p15keeprate_500.pth"
+    # )
+    # prev_model.load_state_dict(prev_state_dict, True)
 
+    # prev_model_benchmark_contexts = [
+    #     prev_model_d1_bc := BenchmarkContext(
+    #         partial(_minimax_dir_fn, model=prev_model, depth=1),
+    #         description="Prev. Model D1 Minimax",
+    #     ),
+    #     prev_model_d3_bc := BenchmarkContext(
+    #         partial(_minimax_dir_fn, model=prev_model, depth=3),
+    #         description="Prev. Model D3 Minimax",
+    #     ),
+    # ]
 
-    prev_model_benchmark_contexts = [
-        prev_model_d1_bc := BenchmarkContext(
-            partial(_minimax_dir_fn, model=prev_model, depth=1),
-            description="Prev. Model D1 Minimax",
-        ),
-        prev_model_d3_bc := BenchmarkContext(
-            partial(_minimax_dir_fn, model=prev_model, depth=3),
-            description="Prev. Model D3 Minimax",
-        ),
-    ]
+    # match_starting_positions = [
+    #     get_start_position(
+    #         NUM_ROWS, NUM_COLS, P_NEUTRAL_START, P_OBSTACLES, OBSTACLE_DENSITY_RANGE
+    #     )
+    #     for _ in range(N_MATCH_START_POSITIONS)
+    # ]
 
-    match_starting_positions = [
-        get_start_position(
-            NUM_ROWS, NUM_COLS, P_NEUTRAL_START, P_OBSTACLES, OBSTACLE_DENSITY_RANGE
-        )
-        for _ in range(N_MATCH_START_POSITIONS)
-    ]
+    with open(r"C:\Users\kylan\Documents\code\repos\KOTron\tron-python\datasets\20250810_5x5_100_starts.bin", "rb") as f:
+        bin_match_starts = f.read()
+
+    # TODO: Just flattening this for now
+    match_starts_proto = from_proto(bin_match_starts)
+
+    match_starting_positions = []
+
+    for g in match_starts_proto:
+        assert len(g) == 1
+        match_starting_positions.append(g[0])
+
 
     match_contexts = [
-        MatchContext(
-            model_d1_bc, fresh_model_d1_bc, match_starting_positions
-        ),
-        MatchContext(
-            model_d1_bc, prev_model_d1_bc, match_starting_positions
-        ),
-        MatchContext(
-            model_d3_bc, fresh_model_d3_bc, match_starting_positions
-        ),
-        MatchContext(
-            model_d3_bc, prev_model_d3_bc, match_starting_positions
-        ),
+        MatchContext(model_d1_bc, fresh_model_d1_bc, match_starting_positions),
+        # MatchContext(model_d1_bc, prev_model_d1_bc, match_starting_positions),
+        MatchContext(model_d3_bc, fresh_model_d3_bc, match_starting_positions),
+        # MatchContext(model_d3_bc, prev_model_d3_bc, match_starting_positions),
     ]
 
     ############################################
@@ -276,76 +318,80 @@ def main():
 
     data_dir = datasets_dir / "20250804_5x5_random_d2_200k"
 
-    pre_train_iters = 0
+    pre_train_iters = -1
 
-    games = []
+    # games = []
 
-    for i, data_file in tqdm(enumerate(data_dir.iterdir())):
+    # for i, data_file in tqdm(enumerate(data_dir.iterdir())):
 
-        # Save the serialized data to a file.
-        with open(data_file, "rb") as f:
-            bin_data = f.read()
+    #     # Save the serialized data to a file.
+    #     with open(data_file, "rb") as f:
+    #         bin_data = f.read()
 
-        games.extend(from_proto(bin_data))
+    #     games.extend(from_proto(bin_data))
 
+    # for i in range(5):
 
-    for i in range(5):
+    #     pre_train_iters = i
 
-        pre_train_iters = i
+    #     benchmark(
+    #         i,
+    #         tb_writer,
+    #         model,
+    #         model_benchmark_contexts,
+    #         match_contexts if i % PLAY_MATCH_EVERY_N == 0 else [],
+    #     )
 
-        benchmark(i, tb_writer, model, model_benchmark_contexts, match_contexts if i % PLAY_MATCH_EVERY_N == 0 else [])
+    #     # # Save the serialized data to a file.
+    #     # with open(data_file, "rb") as f:
+    #     #     bin_data = f.read()
 
-        # # Save the serialized data to a file.
-        # with open(data_file, "rb") as f:
-        #     bin_data = f.read()
+    #     # game_data = from_proto(bin_data)
 
-        # game_data = from_proto(bin_data)
+    #     dataloader = make_dataloader(games, batch_size=BATCH_SIZE, keep_rate=0.0025)
 
-        dataloader = make_dataloader(games, batch_size=BATCH_SIZE, keep_rate=0.0025)
+    #     avg_loss, avg_pred_magnitude = train_loop(
+    #         model, dataloader, optimizer, criterion, epochs=1
+    #     )
 
-        avg_loss, avg_pred_magnitude = train_loop(
-            model, dataloader, optimizer, criterion, epochs=1
-        )
+    #     sos_dict, total_sos = get_sos_info(model)
 
+    #     print(f"{avg_loss=:.3f}, {avg_pred_magnitude=:.3f}, {total_sos=}")
 
-        sos_dict, total_sos = get_sos_info(model)
+    #     # print("\nSum of squares (weights/biases):")
+    #     # for param, sos_val in sos_dict.items():
+    #     #     print(f"{param:40s} {sos_val}")
 
-        print(f"{avg_loss=:.3f}, {avg_pred_magnitude=:.3f}, {total_sos=}")
+    #     tb_writer.add_scalar("Weights Sum of Squares", total_sos, i)
+    #     tb_writer.add_scalar("Average Loss", avg_loss, i)
+    #     tb_writer.add_scalar("Average Prediction Magnitude", avg_pred_magnitude, i)
 
-        # print("\nSum of squares (weights/biases):")
-        # for param, sos_val in sos_dict.items():
-        #     print(f"{param:40s} {sos_val}")
-
-        tb_writer.add_scalar("Weights Sum of Squares", total_sos, i)
-        tb_writer.add_scalar("Average Loss", avg_loss, i)
-        tb_writer.add_scalar("Average Prediction Magnitude", avg_pred_magnitude, i)
-
-        if i % 10 == 0:
-            torch.save(
-                model.state_dict(),
-                checkpoints_folder / f"pretrain_{RUN_DESCRIPTION}_{i}.pth",
-            )
+    #     if i % 10 == 0:
+    #         torch.save(
+    #             model.state_dict(),
+    #             checkpoints_dir / f"pretrain_{RUN_UID}_{i}.pth",
+    #         )
 
     ############################################
-    # CLIENT LOOP
+    # SIM/TRAIN/BENCHMARK LOOP
     ############################################
 
     cache = LRUCache(maxsize=20000000)
+
     @cached(cache)
     def lru_eval(pov_game_state: PovGameState):
         return model.run_inference(pov_game_state)
 
-
     total_p1_wins = total_p2_wins = total_ties = 0
 
-    for i in range(pre_train_iters + 1, 1_000_000):
+    for i in range(pre_train_iters + 1, TRAIN_ITERS):
+
+        # Clear cache once model updated
+        cache.clear()
 
         games: list[list[GameState]] = []
 
         p1_wins = p2_wins = ties = 0
-
-        # Clear cache once model updated
-        cache.clear()
 
         for _ in tqdm(range(GAMES_PER_ITER)):
 
@@ -357,41 +403,33 @@ def main():
 
             current_game: list[GameState] = [game_state]
 
-            next_root = None
+            next_p1_root = next_p2_root = None
             while game_status.status == GameStatus.IN_PROGRESS:
 
-                # p1_mm_result = basic_minimax(
-                #     game_state,
-                #     SIM_GAME_DEPTH,
-                #     is_maximizing_player=True,
-                #     context=MinimaxContext(model.run_inference, 0, 1),
-                # )
-
-                # p2_mm_result = basic_minimax(
-                #     game_state,
-                #     SIM_GAME_DEPTH,
-                #     is_maximizing_player=True,
-                #     context=MinimaxContext(model.run_inference, 1, 0),
-                # )
-
-                # p1_dir = (
-                #     p1_mm_result.principal_variation
-                #     if p1_mm_result.principal_variation is not None
-                #     else Direction.UP
-                # )
-
-                # p2_dir = (
-                #     p2_mm_result.principal_variation
-                #     if p2_mm_result.principal_variation is not None
-                #     else Direction.UP
-                # )
-
-
-                root: MCTS.Node = MCTS.search(
-                    lru_eval, game_state, 0, n_iterations=MCTS_ITERS, root=next_root
+                p1_dir, p1_root = MCTS.search(
+                    lru_eval,
+                    game_state,
+                    hero_index=0,
+                    n_iterations=MCTS_ITERS,
+                    win_reward=WIN_REWARD,
+                    temp=TEMP,
+                    exploration_factor=EXPLR_FACTOR,
+                    root=next_p1_root,
                 )
 
-                p1_dir, p2_dir, next_root = MCTS.get_move_pair(root, 0, temp=TEMP)
+                p2_dir, p2_root = MCTS.search(
+                    lru_eval,
+                    game_state,
+                    hero_index=1,
+                    n_iterations=MCTS_ITERS,
+                    win_reward=WIN_REWARD,
+                    temp=TEMP,
+                    exploration_factor=EXPLR_FACTOR,
+                    root=next_p2_root,
+                )
+
+                next_p1_root = MCTS.get_next_root(p1_root, p1_dir, p2_dir)
+                next_p2_root = MCTS.get_next_root(p2_root, p2_dir, p1_dir)
 
                 # show_game_state(game_state, step_through=True)
 
@@ -399,9 +437,6 @@ def main():
                 # p2_dir = choose_direction_random(game_state, 1)
 
                 game_state = tron.next(game_state, directions=(p1_dir, p2_dir))
-
-                if next_root is not None:
-                    assert game_state == next_root.game_state
 
                 current_game.append(game_state)
 
@@ -424,7 +459,7 @@ def main():
 
         # Save the serialized data to a file.
         with open(
-            data_out_folder / f"gamedata_{i}_ngames_{GAMES_PER_ITER}.bin", "wb"
+            data_out_dir / f"gamedata_{i}_ngames_{GAMES_PER_ITER}.bin", "wb"
         ) as f:
             f.write(serialized_data)
 
@@ -435,7 +470,7 @@ def main():
         total_p1_wins += p1_wins
         total_p2_wins += p2_wins
 
-        print(f"{total_p1_wins}, {total_p2_wins=}, {total_ties=}")
+        print(f"{total_p1_wins=}, {total_p2_wins=}, {total_ties=}")
 
         tb_writer.add_scalar("P1 Wins / Total Wins", p1_wins / (p1_wins + p2_wins), i)
         tb_writer.add_scalar("Tie Rate", ties / GAMES_PER_ITER, i)
@@ -443,6 +478,14 @@ def main():
             "Average Game Length",
             sum([len(game) for game in games]) / GAMES_PER_ITER,
             i,
+        )
+
+        benchmark(
+            i,
+            tb_writer,
+            model,
+            model_benchmark_contexts,
+            match_contexts if i % PLAY_MATCH_EVERY_N == 0 else [],
         )
 
         dataloader = make_dataloader(games, batch_size=BATCH_SIZE, keep_rate=KEEP_RATE)
@@ -462,11 +505,9 @@ def main():
         tb_writer.add_scalar("Average Loss", avg_loss, i)
         tb_writer.add_scalar("Average Prediction Magnitude", avg_pred_magnitude, i)
 
-        benchmark(i, tb_writer, model, model_benchmark_contexts, match_contexts if i % PLAY_MATCH_EVERY_N == 0 else [])
-
         if i % CHECKPOINT_EVERY_N == 0:
             torch.save(
-                model.state_dict(), checkpoints_folder / f"{RUN_DESCRIPTION}_{i}.pth"
+                model.state_dict(), checkpoints_dir / f"{RUN_UID}_{i}.pth"
             )
 
 

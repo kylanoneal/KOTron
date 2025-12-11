@@ -13,8 +13,14 @@ authors = [
   { name = "Kylan O'Neal", email = "kylanoneal@gmail.com" }
 ]
 dependencies = [
-  "numpy>=1.25",
-  "torch>=2.0"
+  "numpy",
+  "torch",
+  "tensorboard",
+  "pygame",
+  "zmq",
+  "cachetools",
+  "tqdm",
+  "matplotlib"
 ]
 classifiers = [
   "Programming Language :: Python :: 3",
