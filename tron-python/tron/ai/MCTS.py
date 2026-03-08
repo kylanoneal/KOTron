@@ -25,7 +25,7 @@ class Node:
         hero_index: int,
         is_hero: bool,
         prev_move: Direction,
-        eval: float,
+        eval= None,
         parent=None,
     ):
         self.game_state = game_state
@@ -65,7 +65,14 @@ class Node:
 
                 next_game_state = next(self.game_state, next_dirs)
 
-                eval = eval_mcts(next_game_state, is_hero=False, mm_context=mm_context)
+                # Update accumulator IF accumulator update function (?) is defined,
+                # otherwise, have a non-op or skip the step
+
+                # acc = update_acc(self.parent.acc, self.parent.game_state, next_game_state)
+
+
+                # Old eval: 
+                # eval = eval_mcts(next_game_state, is_hero=False, mm_context=mm_context)
 
                 child_node = Node(
                     next_game_state,
@@ -73,8 +80,20 @@ class Node:
                     is_hero=False,
                     prev_move=direction,
                     parent=self,
-                    eval=eval,
+                    eval=None,
                 )
+
+
+                # Do new eval - change eval_fn to take in a MCTS node, so it has access to accumulator, 
+                # and anything else it might need (more than just the PovGameState)
+                #
+
+                # Do status check on next_game_state. Assign eval to win /tie reward if terminal
+                # OTHERWISE:
+                # child_node.eval = eval_fn(node: Node)
+
+
+            
                 self.children.append(child_node)
 
         else:
@@ -129,6 +148,79 @@ def eval_mcts(
 
     return eval
 
+def find_best_leaf(node, exploration_factor) -> Node:
+    while len(node.children) > 0:
+        _, node = select(node, exploration_factor)
+    return node
+
+def select(node, exploration_factor):
+    best_value = float("-inf")
+    best_action = None
+    best_child = None
+
+    # print("\nSelecting child...")
+    for child in node.children:
+
+        # IF CHILD UNVISITED ALWAYS VISIT
+        # if child.n_visits == 0:
+        #     ucb1_value = float('inf')  # Encourage exploration
+        # else:
+
+        # Trying without above approach, adding 1 to child.n_visits in order to avoid divide by zero
+        curr_child_visits = child.n_visits + 1
+
+        # print(f"{child.is_hero=}, {child_eval=}")
+
+        exploitation_value = child.total_reward / curr_child_visits
+
+        exploration_value = exploration_factor * np.sqrt(
+            np.log(node.n_visits) / curr_child_visits
+        )
+
+        ucb1_value = exploitation_value + exploration_value
+
+        # print("Current best value: ", best_value, " current ucb1 value: ", ucb1_value)
+        if ucb1_value > best_value:
+            best_value = ucb1_value
+            best_action = child.prev_move
+            best_child = child
+    return best_action, best_child
+
+def count_depth_of_node(node) -> int:
+    count = 0
+    while node.parent:
+        count += 1
+        node = node.parent
+
+    return count
+
+def backpropagate(node):
+
+    node.n_visits += 1
+    reward = node.total_reward
+    is_hero_reward = node.is_hero
+
+    if node.is_hero:
+        assert reward == 0.0
+
+    while node.parent:
+        node = node.parent
+        node.n_visits += 1
+
+        if node.is_hero == is_hero_reward:
+            node.total_reward += reward
+        else:
+            node.total_reward -= reward
+
+def action_probabilities(node):
+
+    actions = []
+    visits = []
+    for child in node.children:
+        actions.append(child.prev_move)
+        visits.append(child.n_visits)
+
+    return actions, visits
 
 def search(
     inference_fn: callable,
@@ -161,83 +253,9 @@ def search(
         assert not root.is_hero
         root.parent = None
 
-    def find_best_leaf(node) -> Node:
-        while len(node.children) > 0:
-            _, node = select(node)
-        return node
-
-    def select(node):
-        best_value = float("-inf")
-        best_action = None
-        best_child = None
-
-        # print("\nSelecting child...")
-        for child in node.children:
-
-            # IF CHILD UNVISITED ALWAYS VISIT
-            # if child.n_visits == 0:
-            #     ucb1_value = float('inf')  # Encourage exploration
-            # else:
-
-            # Trying without above approach, adding 1 to child.n_visits in order to avoid divide by zero
-            curr_child_visits = child.n_visits + 1
-
-            # print(f"{child.is_hero=}, {child_eval=}")
-
-            exploitation_value = child.total_reward / curr_child_visits
-
-            exploration_value = exploration_factor * np.sqrt(
-                np.log(node.n_visits) / curr_child_visits
-            )
-
-            ucb1_value = exploitation_value + exploration_value
-
-            # print("Current best value: ", best_value, " current ucb1 value: ", ucb1_value)
-            if ucb1_value > best_value:
-                best_value = ucb1_value
-                best_action = child.prev_move
-                best_child = child
-        return best_action, best_child
-
-    def count_depth_of_node(node) -> int:
-        count = 0
-        while node.parent:
-            count += 1
-            node = node.parent
-
-        return count
-
-    def backpropagate(node):
-
-        node.n_visits += 1
-        reward = node.total_reward
-        is_hero_reward = node.is_hero
-
-        if node.is_hero:
-            assert reward == 0.0
-
-        while node.parent:
-            node = node.parent
-            node.n_visits += 1
-
-            if node.is_hero == is_hero_reward:
-                node.total_reward += reward
-            else:
-                node.total_reward -= reward
-
-    def action_probabilities(node):
-
-        actions = []
-        visits = []
-        for child in node.children:
-            actions.append(child.prev_move)
-            visits.append(child.n_visits)
-
-        return actions, visits
-
     for _ in range(root.n_visits, n_iterations):
 
-        leaf = find_best_leaf(root)
+        leaf = find_best_leaf(root, exploration_factor)
 
         if not leaf.is_expanded:
             leaf.expand(mm_context)
