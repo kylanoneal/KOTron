@@ -11,7 +11,6 @@ from tron.ai.training import PovGameState
 from tron.ai.tron_model import TronModel
 
 
-
 # --- 2. Define the efficient‐updatable net ---
 class NnueTronModel(TronModel):
     def __init__(self, num_rows, num_cols, acc_dim=128):
@@ -208,7 +207,7 @@ class NnueTronModel(TronModel):
 
 class QuantizedNnueTronModel(TronModel):
 
-    def __init__(self, model: NnueTronModel, scale = 256):
+    def __init__(self, model: NnueTronModel, scale=256):
 
         super().__init__()
         self.raw_model = model
@@ -221,33 +220,77 @@ class QuantizedNnueTronModel(TronModel):
         self.linear_bias = torch.round(model.fc1.bias * scale * scale).to(torch.int32)
 
 
-    def run_inference(self, pov_game_state: PovGameState) -> float:
 
-        indices = self.raw_model.get_active_indices(pov_game_state)
-        # 1. Sum embeddings (int accumulator)
-        acc = self.embed_weights[indices].sum(dim=0)  # [acc_dim], int32
-        #print(f"After sum: {acc.sum().item() / 1024=}")
+    def run_inference_acc(self, acc) -> float:
 
         # 2. Clamp to [0, scale]
         acc = torch.clamp(acc, 0, self.scale)
-        #print(f"After clamp: {acc.sum().item()/ 1024=}")
+        # print(f"After clamp: {acc.sum().item()/ 1024=}")
 
         acc = acc.to(dtype=torch.int32)
 
-        #print(f"After int32 cast: {acc.sum().item()/ 1024=}")
+        # print(f"After int32 cast: {acc.sum().item()/ 1024=}")
 
         # 3. Linear layer in integer domain
         #    (1 x acc_dim) @ (acc_dim) -> scalar
         y_int = (self.linear_weights @ acc) + self.linear_bias  # still int32
 
-        #print(f"After linear: {y_int.sum().item()/ 1024 / 1024=}")
+        # print(f"After linear: {y_int.sum().item()/ 1024 / 1024=}")
 
         # 4. Rescale back to float
         y = y_int.float() / (self.scale * self.scale)
 
         return y.item()
 
-    def get_model_input(
-        self, pov_game_states: list[PovGameState]
-    ) -> torch.Tensor:
+    def initilize_acc(self, pov_game_state):
+
+        indices = self.raw_model.get_active_indices(pov_game_state)
+        # 1. Sum embeddings (int accumulator)
+        acc = self.embed_weights[indices].sum(dim=0)  # [acc_dim], int32
+
+        return acc
+    
+
+    def run_inference(self, pov_game_state: PovGameState) -> float:
+
+        acc = self.initilize_acc(pov_game_state)
+        
+        return self.run_inference_acc(acc)
+
+    def update_acc(
+        self,
+        prev_acc,
+        hero_index: int,
+        opponent_index: int,
+        prev_game_state,
+        new_game_state,
+    ):
+
+        prev_hero = prev_game_state.players[hero_index]
+        prev_oppo = prev_game_state.players[opponent_index]
+
+        new_hero = new_game_state.players[hero_index]
+        new_oppo = new_game_state.players[opponent_index]
+
+        subtract_indices = [
+            self.raw_model.emb_idx_hero_head(prev_hero.row, prev_hero.col),
+            self.raw_model.emb_idx_opponent_head(prev_oppo.row, prev_oppo.col),
+        ]
+
+        add_indices = [
+            self.raw_model.emb_idx_wall(new_hero.row, new_hero.col),
+            self.raw_model.emb_idx_wall(new_oppo.row, new_oppo.col),
+            self.raw_model.emb_idx_hero_head(new_hero.row, new_hero.col),
+            self.raw_model.emb_idx_opponent_head(new_oppo.row, new_oppo.col),
+        ]
+
+        acc = (
+            prev_acc
+            - self.embed_weights[subtract_indices].sum(dim=0)
+            + self.embed_weights[add_indices].sum(dim=0)
+        )
+
+        return acc
+
+    def get_model_input(self, pov_game_states: list[PovGameState]) -> torch.Tensor:
         raise RuntimeError("Quantized NNUE is not used for training.")

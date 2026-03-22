@@ -97,7 +97,9 @@ class GameState:
     grid: np.ndarray[bool]
     players: tuple[Player]
 
-    def __post_init__(self):
+    # post_init is safe but slow
+    # def __post_init__(self):
+    def validate_game_state(self):
         # 1. Validate players container
         if not isinstance(self.players, tuple):
             raise TypeError(
@@ -414,7 +416,7 @@ def next(game: GameState, directions: tuple[Direction]) -> GameState:
         next_players.append(Player(next_row, next_col, next_can_move))
 
     # Update grid and handle case where 2 or more players try to occupy the same square
-    for i in range(len(next_players)):
+    for i in range(len(next_players) - 1):
 
         pi: Player = next_players[i]
         next_grid[pi.row, pi.col] = True

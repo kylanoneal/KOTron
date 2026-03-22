@@ -1,9 +1,11 @@
+from dataclasses import dataclass
 import math
 import random
 import numpy as np
+
 from tqdm import tqdm
 from copy import deepcopy
-
+from typing import Optional
 
 from tron.ai.tron_model import TronModel, PovGameState
 from tron.game import (
@@ -14,34 +16,46 @@ from tron.game import (
     next,
     get_status,
 )
-from tron.ai.minimax import basic_minimax, MinimaxContext, MinimaxResult
 from tron.ai.algos import choose_direction_random
+
+
+@dataclass
+class MctsContext:
+
+    hero_index: int
+    opponent_index: int
+    win_magnitude: float
+    eval_fn: callable
+    acc_update_fn: Optional[callable] = None
 
 
 class Node:
     def __init__(
         self,
+        context: MctsContext,
         game_state: GameState,
-        hero_index: int,
         is_hero: bool,
         prev_move: Direction,
-        eval= None,
-        parent=None,
+        eval: Optional[float] = None,
+        parent: Optional["Node"] = None,
+        acc = None
     ):
+        self.context = context
         self.game_state = game_state
-        self.hero_index = hero_index
         self.is_hero = is_hero
         self.prev_move = prev_move
-
+        self.eval = eval
         self.parent = parent
+        self.acc = acc
+
         self.children = []
         self.n_visits = 0
         self.total_reward = eval
-        self.eval = eval
         self.is_expanded = False
 
     # Consolidate the expanding of game states to a single place
-    def expand(self, mm_context: MinimaxContext):
+    def expand(self):
+
 
         assert len(self.children) == 0, "Only should be expanding a node once"
         assert not self.is_expanded
@@ -50,9 +64,12 @@ class Node:
 
         if self.is_hero:
 
-            opponent_index = 0 if self.hero_index == 1 else 1
+            assert (
+                get_status(self.game_state).status == GameStatus.IN_PROGRESS
+            ), "Hero states must be in progress"
+
             possible_directions = get_possible_directions(
-                self.game_state, opponent_index
+                self.game_state, self.context.opponent_index
             )
             possible_directions = (
                 [Direction.UP] if len(possible_directions) == 0 else possible_directions
@@ -60,40 +77,55 @@ class Node:
 
             for direction in possible_directions:
                 next_dirs = [None, None]
-                next_dirs[opponent_index] = direction
-                next_dirs[self.hero_index] = self.prev_move
+                next_dirs[self.context.opponent_index] = direction
+                next_dirs[self.context.hero_index] = self.prev_move
 
                 next_game_state = next(self.game_state, next_dirs)
 
-                # Update accumulator IF accumulator update function (?) is defined,
-                # otherwise, have a non-op or skip the step
-
-                # acc = update_acc(self.parent.acc, self.parent.game_state, next_game_state)
-
-
-                # Old eval: 
-                # eval = eval_mcts(next_game_state, is_hero=False, mm_context=mm_context)
+                next_status = get_status(self.game_state)
 
                 child_node = Node(
+                    self.context,
                     next_game_state,
-                    self.hero_index,
                     is_hero=False,
                     prev_move=direction,
-                    parent=self,
                     eval=None,
+                    parent=self,
                 )
 
+                if next_status.status == GameStatus.IN_PROGRESS:
 
-                # Do new eval - change eval_fn to take in a MCTS node, so it has access to accumulator, 
-                # and anything else it might need (more than just the PovGameState)
-                #
+                    # Update accumulator IF accumulator update function (?) is defined,
+                    # otherwise, have a non-op or skip the step
 
-                # Do status check on next_game_state. Assign eval to win /tie reward if terminal
-                # OTHERWISE:
-                # child_node.eval = eval_fn(node: Node)
+                    if self.context.acc_update_fn is not None:
+                        child_node.acc = self.context.acc_update_fn(
+                            self.parent.acc, self.context.hero_index, self.context.opponent_index, self.parent.game_state, next_game_state
+                        )
 
+                    # Do new eval - change eval_fn to take in a MCTS node, so it has access to accumulator,
+                    # and anything else it might need (more than just the PovGameState)
+                    #
 
-            
+                    # Do status check on next_game_state. Assign eval to win /tie reward if terminal
+                    # OTHERWISE:
+                    eval = self.context.eval_fn(child_node)
+
+                elif next_status.status == GameStatus.WINNER:
+
+                    eval = (
+                        self.context.win_magnitude
+                        if next_status.winner_index == self.context.hero_index
+                        else self.context.win_magnitude * -1
+                    )
+
+                elif next_status.status == GameStatus.TIE:
+                    eval = 0.0
+                else:
+                    raise ValueError()
+
+                child_node.eval = eval
+                child_node.total_reward = eval
                 self.children.append(child_node)
 
         else:
@@ -101,7 +133,7 @@ class Node:
                 return
 
             possible_directions = get_possible_directions(
-                self.game_state, self.hero_index
+                self.game_state, self.context.hero_index
             )
 
             possible_directions = (
@@ -109,49 +141,23 @@ class Node:
             )
             for direction in possible_directions:
 
-                eval = eval_mcts(
-                    self.game_state,
-                    is_hero=True,
-                    mm_context=mm_context,
-                    hero_move=direction,
-                )
-
                 child_node = Node(
+                    self.context,
                     self.game_state,
-                    self.hero_index,
                     is_hero=True,
                     prev_move=direction,
+                    eval=0.0,
                     parent=self,
-                    eval=eval,
                 )
 
                 self.children.append(child_node)
 
 
-def eval_mcts(
-    game_state: GameState, is_hero: bool, mm_context: MinimaxContext, hero_move=None
-):
-
-    if is_hero:
-
-        assert get_status(game_state).status == GameStatus.IN_PROGRESS
-        # eval = basic_minimax(game_state, depth=1, is_maximizing_player=False, context=mm_context, maximizing_player_move=hero_move).evaluation
-        eval = 0.0
-    else:
-
-        mm_result = basic_minimax(
-            game_state, depth=0, is_maximizing_player=True, context=mm_context
-        )
-
-        # Negate hero perspective eval
-        eval = -mm_result.evaluation
-
-    return eval
-
 def find_best_leaf(node, exploration_factor) -> Node:
     while len(node.children) > 0:
         _, node = select(node, exploration_factor)
     return node
+
 
 def select(node, exploration_factor):
     best_value = float("-inf")
@@ -186,6 +192,7 @@ def select(node, exploration_factor):
             best_child = child
     return best_action, best_child
 
+
 def count_depth_of_node(node) -> int:
     count = 0
     while node.parent:
@@ -193,6 +200,7 @@ def count_depth_of_node(node) -> int:
         node = node.parent
 
     return count
+
 
 def backpropagate(node):
 
@@ -212,6 +220,7 @@ def backpropagate(node):
         else:
             node.total_reward -= reward
 
+
 def action_probabilities(node):
 
     actions = []
@@ -222,35 +231,29 @@ def action_probabilities(node):
 
     return actions, visits
 
+
 def search(
-    inference_fn: callable,
+    context: MctsContext,
     game_state: GameState,
-    hero_index: int,
     n_iterations: int,
-    win_reward: float,
     temp: float,
     exploration_factor: float = 2.0,
     root=None,
+    initial_acc = None
 ) -> tuple[Direction, Node]:
 
     if len(game_state.players) != 2:
         raise NotImplementedError()
 
-    opponent_index = 0 if hero_index == 1 else 1
-
-    # TODO: Pass this instead of creating here?
-    mm_context = MinimaxContext(
-        inference_fn,
-        maximizing_player=hero_index,
-        minimizing_player=opponent_index,
-        win_magnitude=win_reward,
-    )
-
     if root is None:
-        root = Node(game_state, hero_index, is_hero=False, prev_move=None, eval=0.0)
+        assert initial_acc is not None
+
+        root = Node(context, game_state, is_hero=False, prev_move=None, eval=0.0, acc=initial_acc)
+
     else:
         assert game_state == root.game_state
         assert not root.is_hero
+        assert root.acc is not None
         root.parent = None
 
     for _ in range(root.n_visits, n_iterations):
@@ -258,11 +261,12 @@ def search(
         leaf = find_best_leaf(root, exploration_factor)
 
         if not leaf.is_expanded:
-            leaf.expand(mm_context)
+            leaf.expand()
         backpropagate(leaf)
 
     return choose_direction(root, temp), root
     # return action_probabilities(root)
+
 
 def choose_direction(node, temp=1.0) -> Direction:
 
@@ -276,13 +280,13 @@ def choose_direction(node, temp=1.0) -> Direction:
         actions.append(child.prev_move)
         visits.append(child.n_visits)
 
-
     assert sum(visits) > 0
 
     chosen_child_index = softmax_sample(visits, temp=temp)
     hero_dir = actions[chosen_child_index]
 
     return hero_dir
+
 
 def get_next_root(node: Node, hero_dir: Direction, oppo_dir: Direction) -> Node:
 
@@ -296,7 +300,6 @@ def get_next_root(node: Node, hero_dir: Direction, oppo_dir: Direction) -> Node:
             break
     else:
         return None
-    
 
     chosen_grandchild = None
 

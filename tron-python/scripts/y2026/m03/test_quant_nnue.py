@@ -28,6 +28,7 @@ from tron.ai.minimax import basic_minimax, MinimaxContext
 from tron.ai.tron_model import RandomTronModel, CnnTronModel, PovGameState, TronModel
 from tron.ai.quant_nnue import NnueTronModel, QuantizedNnueTronModel
 from tron.ai import MCTS
+from tron.ai.MCTS import MctsContext
 
 from tron.ai.training import (
     train_loop,
@@ -142,31 +143,31 @@ def main():
     # TEMP = args.temp
     # EXPLR_FACTOR = args.explr_factor
 
-    MCTS_ITERS = 512
+    MCTS_ITERS = 64
     TEMP = 0.4  # 0.7
     EXPLR_FACTOR = 2.0
 
     QUANT_SCALE = 256
 
-    RUN_DESCRIPTION = "mcts_quant_nnue_inference_5x5"
+    RUN_DESCRIPTION = "mcts_quant_nnue_fast_inference_5x5"
 
     NUM_ROWS = NUM_COLS = 5
 
     # SIM_GAME_DEPTH = 2
     WIN_REWARD = 1.5
 
-    GAMES_PER_ITER = 256
-    CHECKPOINT_EVERY_N = 10
+    GAMES_PER_ITER = 512
+    CHECKPOINT_EVERY_N = 5
 
-    P_NEUTRAL_START = 0.9  # 0.75
+    P_NEUTRAL_START = 0.75
     P_OBSTACLES = 0.2  # 0.4
     OBSTACLE_DENSITY_RANGE = (0.0, 0.3)
 
-    TRAIN_ITERS = 500
-    PLAY_MATCH_EVERY_N = 10
+    TRAIN_ITERS = 100_000
+    PLAY_MATCH_EVERY_N = 20
     N_MATCH_START_POSITIONS = 100
 
-    RUN_UID = f"FINETUNELR{LR}_B{BATCH_SIZE}"
+    RUN_UID = f"L{LR}_B{BATCH_SIZE}"
 
     ############################################
     # INITIALIZE MODELS
@@ -187,6 +188,8 @@ def main():
     ############################################
     # TENSORBOARD AND MODEL CHECKPOINT SETUP
     ############################################
+
+    tron_dir = Path(tron.__file__).resolve().parent.parent
 
     current_script_path = Path(__file__).resolve()
 
@@ -252,9 +255,7 @@ def main():
 
     fresh_model = CnnTronModel(NUM_ROWS, NUM_COLS)
 
-    fresh_state_dict = torch.load(
-        r"C:\Users\kylan\Documents\code\repos\KOTron\tron-python\models\20250810_5x5_random_init.pth"
-    )
+    fresh_state_dict = torch.load(tron_dir / "models" / "20250810_5x5_random_init.pth")
     fresh_model.load_state_dict(fresh_state_dict, strict=True)
 
     fresh_model_benchmark_contexts = [
@@ -294,7 +295,7 @@ def main():
     # ]
 
     with open(
-        r"C:\Users\kylan\Documents\code\repos\KOTron\tron-python\datasets\20250810_5x5_100_starts.bin",
+        tron_dir / "datasets" / "20250810_5x5_100_starts.bin",
         "rb",
     ) as f:
         bin_match_starts = f.read()
@@ -319,66 +320,65 @@ def main():
     # PRE-TRAIN
     ############################################
 
-    datasets_dir = Path(tron.__file__).resolve().parent.parent / "datasets"
-
-    data_dir = datasets_dir / "20250801_random_d2_200k"
-
     pre_train_iters = -1
+    # datasets_dir = Path(tron.__file__).resolve().parent.parent / "datasets"
 
-    games = []
+    # data_dir = datasets_dir / "20250801_random_d2_200k"
 
-    for i, data_file in tqdm(enumerate(data_dir.iterdir())):
+    # games = []
 
-        # Save the serialized data to a file.
-        with open(data_file, "rb") as f:
-            bin_data = f.read()
+    # for i, data_file in tqdm(enumerate(data_dir.iterdir())):
 
-        games.extend(from_proto(bin_data))
+    #     # Save the serialized data to a file.
+    #     with open(data_file, "rb") as f:
+    #         bin_data = f.read()
 
-    for i in range(0, len(games), len(games) // 100):
-        game = games[i]
-        assert game[0].grid.shape[0] == NUM_ROWS and game[0].grid.shape[1] == NUM_COLS
+    #     games.extend(from_proto(bin_data))
 
-    for i in range(10):
+    # for i in range(0, len(games), len(games) // 100):
+    #     game = games[i]
+    #     assert game[0].grid.shape[0] == NUM_ROWS and game[0].grid.shape[1] == NUM_COLS
 
-        pre_train_iters = i
+    # for i in range(10):
 
-        benchmark(
-            i,
-            tb_writer,
-            model,
-            model_benchmark_contexts,
-            match_contexts if i % PLAY_MATCH_EVERY_N == 0 else [],
-        )
+    #     pre_train_iters = i
 
-        # # Save the serialized data to a file.
-        # with open(data_file, "rb") as f:
-        #     bin_data = f.read()
+    #     benchmark(
+    #         i,
+    #         tb_writer,
+    #         model,
+    #         model_benchmark_contexts,
+    #         match_contexts if i % PLAY_MATCH_EVERY_N == 0 else [],
+    #     )
 
-        # game_data = from_proto(bin_data)
+    #     # # Save the serialized data to a file.
+    #     # with open(data_file, "rb") as f:
+    #     #     bin_data = f.read()
 
-        dataloader = make_dataloader(games, batch_size=BATCH_SIZE, keep_rate=0.0025)
+    #     # game_data = from_proto(bin_data)
 
-        avg_loss, avg_pred_magnitude = train_loop(
-            model, dataloader, optimizer, criterion, epochs=1
-        )
+    #     dataloader = make_dataloader(games, batch_size=BATCH_SIZE, keep_rate=0.0025)
 
-        sos_dict, total_sos = get_sos_info(model)
+    #     avg_loss, avg_pred_magnitude = train_loop(
+    #         model, dataloader, optimizer, criterion, epochs=1
+    #     )
 
-        print(f"{avg_loss=:.3f}, {avg_pred_magnitude=:.3f}, {total_sos=}")
+    #     sos_dict, total_sos = get_sos_info(model)
 
-        # print("\nSum of squares (weights/biases):")
-        # for param, sos_val in sos_dict.items():
-        #     print(f"{param:40s} {sos_val}")
+    #     print(f"{avg_loss=:.3f}, {avg_pred_magnitude=:.3f}, {total_sos=}")
 
-        tb_writer.add_scalar("Weights Sum of Squares", total_sos, i)
-        tb_writer.add_scalar("Average Loss", avg_loss, i)
-        tb_writer.add_scalar("Average Prediction Magnitude", avg_pred_magnitude, i)
+    #     # print("\nSum of squares (weights/biases):")
+    #     # for param, sos_val in sos_dict.items():
+    #     #     print(f"{param:40s} {sos_val}")
 
-        torch.save(
-            model.state_dict(),
-            checkpoints_dir / f"pretrain_{RUN_UID}_{i}.pth",
-        )
+    #     tb_writer.add_scalar("Weights Sum of Squares", total_sos, i)
+    #     tb_writer.add_scalar("Average Loss", avg_loss, i)
+    #     tb_writer.add_scalar("Average Prediction Magnitude", avg_pred_magnitude, i)
+
+    #     torch.save(
+    #         model.state_dict(),
+    #         checkpoints_dir / f"pretrain_{RUN_UID}_{i}.pth",
+    #     )
 
     ############################################
     # SIM/TRAIN/BENCHMARK LOOP
@@ -393,9 +393,17 @@ def main():
 
         quant_model = QuantizedNnueTronModel(model, scale=QUANT_SCALE)
 
-        @cached(LRUCache(maxsize=20000000))
-        def lru_eval(pov_game_state: PovGameState):
-            return quant_model.run_inference(pov_game_state)
+        # TODO: Figure out LRU caching for NNue approach
+        # @cached(LRUCache(maxsize=20000000))
+        def mcts_eval_fn(node: MCTS.Node):
+            return quant_model.run_inference_acc(node.acc)
+
+        p1_mcts_context = MctsContext(
+            0, 1, WIN_REWARD, mcts_eval_fn, quant_model.update_acc
+        )
+        p2_mcts_context = MctsContext(
+            1, 0, WIN_REWARD, mcts_eval_fn, quant_model.update_acc
+        )
 
         games: list[list[GameState]] = []
 
@@ -414,29 +422,30 @@ def main():
 
             current_game: list[GameState] = [game_state]
 
+            p1_initial_acc = quant_model.initilize_acc(PovGameState(game_state, 0))
+            p2_initial_acc = quant_model.initilize_acc(PovGameState(game_state, 1))
+
             next_p1_root = next_p2_root = None
             while game_status.status == GameStatus.IN_PROGRESS:
 
                 p1_dir, p1_root = MCTS.search(
-                    lru_eval,
+                    p1_mcts_context,
                     game_state,
-                    hero_index=0,
                     n_iterations=MCTS_ITERS,
-                    win_reward=WIN_REWARD,
                     temp=TEMP,
                     exploration_factor=EXPLR_FACTOR,
                     root=next_p1_root,
+                    initial_acc=p1_initial_acc if next_p1_root is None else None,
                 )
 
                 p2_dir, p2_root = MCTS.search(
-                    lru_eval,
+                    p2_mcts_context,
                     game_state,
-                    hero_index=1,
                     n_iterations=MCTS_ITERS,
-                    win_reward=WIN_REWARD,
                     temp=TEMP,
                     exploration_factor=EXPLR_FACTOR,
                     root=next_p2_root,
+                    initial_acc=p2_initial_acc if next_p2_root is None else None,
                 )
 
                 next_p1_root = MCTS.get_next_root(p1_root, p1_dir, p2_dir)
