@@ -6,22 +6,8 @@ import numpy as np
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
-from tron.game import GameState, Player
+from tron.game import GameState, Player, PovGameState, from_bitboard
 
-
-@dataclass
-class PovGameState:
-    game_state: GameState
-    hero_index: int
-
-    def __eq__(self, other):
-        if not isinstance(other, PovGameState):
-            return False
-        return self.hero_index == other.hero_index and self.game_state == other.game_state
-
-    def __hash__(self):
-
-        return hash((self.game_state, self.hero_index))
 
 class TronModel(torch.nn.Module, ABC):
 
@@ -109,8 +95,10 @@ class CnnTronModel(TronModel):
         self, pov_game_states: list[PovGameState]
     ) -> torch.Tensor:
 
+
+
         bool_array = (
-            np.stack([h.game_state.grid for h in pov_game_states], axis=0)
+            np.stack([from_bitboard(h.game_state).grid for h in pov_game_states], axis=0)
             .astype(np.float32)
             .reshape((len(pov_game_states), 1, self.num_rows, self.num_cols))
         )
@@ -119,7 +107,7 @@ class CnnTronModel(TronModel):
 
         for i, pov_game_state in enumerate(pov_game_states):
 
-            game_state = pov_game_state.game_state
+            game_state = from_bitboard(pov_game_state.game_state)
             hero_index = pov_game_state.hero_index
             opponent_index = 0 if hero_index == 1 else 1
 

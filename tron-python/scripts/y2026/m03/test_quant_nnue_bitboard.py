@@ -1,42 +1,33 @@
-import zmq
-import uuid
-import json
 import torch
 import shutil
 import random
 import datetime
-import argparse
+
 from tqdm import tqdm
-from copy import deepcopy
 from pathlib import Path
 from functools import partial
 from dataclasses import dataclass
-from cachetools import LRUCache, cached
-
-import tron
-
 from torch.utils.tensorboard import SummaryWriter
 
 
-from tron.game import GameState, GameStatus, StatusInfo, Direction
-from tron.bitboard import (
-    from_bitboard,
+import tron
+from tron.game import (
+    GameState,
+    GameStatus,
+    StatusInfo,
+    Direction,
     from_2d_game_state,
-    BitBoardGameState,
-    BitBoardPlayer,
-    PovBitBoardGameState
+    from_bitboard,
+    next,
 )
 
-from tron.bitboard import next as bitboard_next
+from tron.game_2d import GameState2D
 
-# from tron.gui.utility_gui import show_game_state
-
-from tron.ai.algos import choose_direction_random
 
 from tron.ai.minimax import basic_minimax, MinimaxContext
 
 from tron.ai.tron_model import RandomTronModel, CnnTronModel, PovGameState, TronModel
-from tron.ai.quant_nnue import NnueTronModel, QuantizedNnueTronModel
+from tron.ai.quant_nnue_bitboard import NnueTronModel, QuantizedNnueTronModel
 from tron.ai import MCTS
 from tron.ai.MCTS import MctsContext
 
@@ -84,13 +75,15 @@ def get_start_position(
     min_d, max_d = obstacle_density_range
     obstacle_density = random.uniform(min_d, max_d) if are_obstacles else 0.0
 
-    return GameState.new_game(
-        num_players=2,
-        num_rows=n_rows,
-        num_cols=n_cols,
-        random_starts=True,
-        neutral_starts=is_neutral_start,
-        obstacle_density=obstacle_density,
+    return from_2d_game_state(
+        GameState2D.new_game(
+            num_players=2,
+            num_rows=n_rows,
+            num_cols=n_cols,
+            random_starts=True,
+            neutral_starts=is_neutral_start,
+            obstacle_density=obstacle_density,
+        )
     )
 
 
@@ -166,7 +159,7 @@ def main():
     # SIM_GAME_DEPTH = 2
     WIN_REWARD = 1.5
 
-    GAMES_PER_ITER = 512
+    GAMES_PER_ITER = 64
     CHECKPOINT_EVERY_N = 5
 
     P_NEUTRAL_START = 0.75
@@ -190,7 +183,6 @@ def main():
     #     r"C:\Users\kylan\Documents\code\repos\KOTron\tron-python\scripts\y2025\m08\cnn\runs\20250810-224509_mcts_cnn_5x5\LR0.001_B4\checkpoints\LR0.001_B4_30.pth"
     # )
     # model.load_state_dict(state_dict, strict=True)
-    model.reset_acc()
 
     criterion = torch.nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), amsgrad=True, lr=LR)
@@ -254,15 +246,6 @@ def main():
             else Direction.UP
         )
 
-    model_benchmark_contexts = [
-        model_d1_bc := BenchmarkContext(
-            partial(_minimax_dir_fn, model=model, depth=1), description="D1 Minimax"
-        ),
-        model_d3_bc := BenchmarkContext(
-            partial(_minimax_dir_fn, model=model, depth=3), description="D3 Minimax"
-        ),
-    ]
-
     fresh_model = CnnTronModel(NUM_ROWS, NUM_COLS)
 
     fresh_state_dict = torch.load(tron_dir / "models" / "20250810_5x5_random_init.pth")
@@ -318,13 +301,6 @@ def main():
     for g in match_starts_proto:
         assert len(g) == 1
         match_starting_positions.append(from_2d_game_state(g[0]))
-
-    match_contexts = [
-        MatchContext(model_d1_bc, fresh_model_d1_bc, match_starting_positions),
-        # MatchContext(model_d1_bc, prev_model_d1_bc, match_starting_positions),
-        MatchContext(model_d3_bc, fresh_model_d3_bc, match_starting_positions),
-        # MatchContext(model_d3_bc, prev_model_d3_bc, match_starting_positions),
-    ]
 
     ############################################
     # PRE-TRAIN
@@ -398,9 +374,6 @@ def main():
 
     for i in range(pre_train_iters + 1, TRAIN_ITERS):
 
-        # Reset stateful accumulator once model updated
-        model.reset_acc()
-
         quant_model = QuantizedNnueTronModel(model, scale=QUANT_SCALE)
 
         # TODO: Figure out LRU caching for NNue approach
@@ -421,29 +394,20 @@ def main():
 
         for _ in tqdm(range(GAMES_PER_ITER)):
 
-            # NOTE: Just resetting it everygame cause why not
-            model.reset_acc()
-
-            game_state: BitBoardGameState = from_2d_game_state(
-                get_start_position(
-                    NUM_ROWS,
-                    NUM_COLS,
-                    P_NEUTRAL_START,
-                    P_OBSTACLES,
-                    OBSTACLE_DENSITY_RANGE,
-                )
+            game_state: GameState = get_start_position(
+                NUM_ROWS,
+                NUM_COLS,
+                P_NEUTRAL_START,
+                P_OBSTACLES,
+                OBSTACLE_DENSITY_RANGE,
             )
 
             game_status: StatusInfo = tron.get_status(game_state)
 
-            current_game: list[BitBoardGameState] = [game_state]
+            current_game: list[GameState] = [game_state]
 
-            p1_initial_acc = quant_model.initilize_acc(
-                PovBitBoardGameState(game_state, 0)
-            )
-            p2_initial_acc = quant_model.initilize_acc(
-                PovBitBoardGameState(game_state, 1)
-            )
+            p1_initial_acc = quant_model.initilize_acc(PovGameState(game_state, 0, 1))
+            p2_initial_acc = quant_model.initilize_acc(PovGameState(game_state, 1, 0))
 
             next_p1_root = next_p2_root = None
             while game_status.status == GameStatus.IN_PROGRESS:
@@ -476,7 +440,7 @@ def main():
                 # p1_dir = choose_direction_random(game_state, 0)
                 # p2_dir = choose_direction_random(game_state, 1)
 
-                game_state = bitboard_next(game_state, directions=(p1_dir, p2_dir))
+                game_state = next(game_state, directions=(p1_dir, p2_dir))
 
                 current_game.append(game_state)
 
@@ -526,13 +490,38 @@ def main():
             i,
         )
 
-        benchmark(
-            i,
-            tb_writer,
-            model,
-            model_benchmark_contexts,
-            match_contexts if i % PLAY_MATCH_EVERY_N == 0 else [],
-        )
+        if i % PLAY_MATCH_EVERY_N == 0:
+
+            model_benchmark_contexts = [
+                model_d1_bc := BenchmarkContext(
+                    partial(_minimax_dir_fn, model=quant_model, depth=1),
+                    description="D1 Minimax",
+                ),
+                model_d3_bc := BenchmarkContext(
+                    partial(_minimax_dir_fn, model=quant_model, depth=3),
+                    description="D3 Minimax",
+                ),
+            ]
+
+            match_contexts = [
+                MatchContext(model_d1_bc, fresh_model_d1_bc, match_starting_positions),
+                # MatchContext(model_d1_bc, prev_model_d1_bc, match_starting_positions),
+                # MatchContext(model_d3_bc, fresh_model_d3_bc, match_starting_positions),
+                # MatchContext(model_d3_bc, prev_model_d3_bc, match_starting_positions),
+            ]
+
+            benchmark(
+                i, tb_writer, quant_model, model_benchmark_contexts, match_contexts
+            )
+
+        else:
+            benchmark(
+                i,
+                tb_writer,
+                quant_model,
+                model_benchmark_contexts,
+                [],  # No match
+            )
 
         dataloader = make_dataloader(games, batch_size=BATCH_SIZE, keep_rate=KEEP_RATE)
 

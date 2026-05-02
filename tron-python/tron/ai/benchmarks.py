@@ -11,10 +11,14 @@ from tron.game import (
     GameStatus,
     get_status,
     next,
-    get_possible_directions,
+    PovGameState,
+    from_2d_game_state,
+    from_bitboard,
 )
 
-from tron.ai.tron_model import TronModel, PovGameState
+from tron.game_2d import GameState2D, Player2D
+
+from tron.ai.tron_model import TronModel
 
 
 @dataclass(frozen=True)
@@ -34,11 +38,16 @@ class Benchmark:
     @staticmethod
     def transform(bench: "Benchmark", do_lr_flip: bool, n_rot_90: int) -> "Benchmark":
 
-        t_game_state = GameState.transform(
-            bench.pov_game_state.game_state, do_lr_flip, n_rot_90
+        game_2d: GameState2D = from_bitboard(bench.pov_game_state.game_state)
+
+        t_game_state = from_2d_game_state(
+            GameState2D.transform(game_2d, do_lr_flip, n_rot_90)
         )
+
         t_pov_game_state = PovGameState(
-            t_game_state, hero_index=bench.pov_game_state.hero_index
+            t_game_state,
+            hero_index=bench.pov_game_state.hero_index,
+            opponent_index=bench.pov_game_state.opponent_index,
         )
 
         t_opposing_dirs = Direction.transform(bench.opposing_dirs, do_lr_flip, n_rot_90)
@@ -58,39 +67,45 @@ class Benchmark:
 BENCHMARKS_5X5 = [
     Benchmark(
         pov_game_state=PovGameState(
-            game_state=GameState(
-                grid=np.array(
-                    [
-                        [1, 0, 1, 0, 1],
-                        [0, 0, 1, 0, 0],
-                        [0, 0, 1, 0, 0],
-                        [0, 0, 1, 0, 0],
-                        [0, 0, 1, 0, 0],
-                    ],
-                    dtype=bool,
-                ),
-                players=(Player(0, 0, True), Player(0, 4, True)),
+            game_state=from_2d_game_state(
+                GameState2D(
+                    grid=np.array(
+                        [
+                            [1, 0, 1, 0, 1],
+                            [0, 0, 1, 0, 0],
+                            [0, 0, 1, 0, 0],
+                            [0, 0, 1, 0, 0],
+                            [0, 0, 1, 0, 0],
+                        ],
+                        dtype=bool,
+                    ),
+                    players=(Player2D(0, 0, True), Player2D(0, 4, True)),
+                )
             ),
             hero_index=0,
+            opponent_index=1,
         ),
         opposing_dirs=([Direction.DOWN] * 4) + [Direction.LEFT] + ([Direction.UP] * 4),
     ),
     Benchmark(
         pov_game_state=PovGameState(
-            game_state=GameState(
-                grid=np.array(
-                    [
-                        [0, 0, 0, 0, 0],
-                        [0, 0, 1, 0, 0],
-                        [1, 1, 1, 1, 1],
-                        [1, 0, 0, 0, 0],
-                        [0, 0, 0, 0, 0],
-                    ],
-                    dtype=bool,
-                ),
-                players=(Player(1, 2, True), Player(3, 0, True)),
+            game_state=from_2d_game_state(
+                GameState2D(
+                    grid=np.array(
+                        [
+                            [0, 0, 0, 0, 0],
+                            [0, 0, 1, 0, 0],
+                            [1, 1, 1, 1, 1],
+                            [1, 0, 0, 0, 0],
+                            [0, 0, 0, 0, 0],
+                        ],
+                        dtype=bool,
+                    ),
+                    players=(Player2D(1, 2, True), Player2D(3, 0, True)),
+                )
             ),
             hero_index=0,
+            opponent_index=1,
         ),
         opposing_dirs=([Direction.RIGHT] * 4)
         + [Direction.DOWN]
@@ -98,20 +113,23 @@ BENCHMARKS_5X5 = [
     ),
     Benchmark(
         pov_game_state=PovGameState(
-            game_state=GameState(
-                grid=np.array(
-                    [
-                        [0, 0, 0, 0, 1],
-                        [0, 1, 1, 1, 1],
-                        [1, 0, 1, 1, 1],
-                        [1, 0, 1, 0, 0],
-                        [1, 0, 1, 0, 0],
-                    ],
-                    dtype=bool,
+            game_state=from_2d_game_state(
+                GameState2D(
+                    grid=np.array(
+                        [
+                            [0, 0, 0, 0, 1],
+                            [0, 1, 1, 1, 1],
+                            [1, 0, 1, 1, 1],
+                            [1, 0, 1, 0, 0],
+                            [1, 0, 1, 0, 0],
+                        ],
+                        dtype=bool,
+                    ),
+                    players=(Player2D(1, 1, True), Player2D(2, 4, True)),
                 ),
-                players=(Player(1, 1, True), Player(2, 4, True)),
             ),
             hero_index=0,
+            opponent_index=1,
         ),
         opposing_dirs=[Direction.DOWN],
         expected_hero_dirs=[Direction.LEFT],
@@ -121,39 +139,45 @@ BENCHMARKS_5X5 = [
 TIE_BENCHMARKS_5X5 = [
     ModelBenchmark(
         pov_game_state=PovGameState(
-            GameState(
-                grid=np.array(
-                    [
-                        [1, 0, 0, 0, 1],
-                        [1, 1, 1, 1, 1],
-                        [1, 1, 1, 1, 1],
-                        [1, 1, 0, 0, 0],
-                        [1, 1, 1, 1, 1],
-                    ],
-                    dtype=bool,
-                ),
-                players=(Player(0, 0, True), Player(4, 2, True)),
+            game_state=from_2d_game_state(
+                GameState2D(
+                    grid=np.array(
+                        [
+                            [1, 0, 0, 0, 1],
+                            [1, 1, 1, 1, 1],
+                            [1, 1, 1, 1, 1],
+                            [1, 1, 0, 0, 0],
+                            [1, 1, 1, 1, 1],
+                        ],
+                        dtype=bool,
+                    ),
+                    players=(Player2D(0, 0, True), Player2D(4, 2, True)),
+                )
             ),
             hero_index=0,
+            opponent_index=1,
         ),
         expected_value=0.0,
     ),
     ModelBenchmark(
         pov_game_state=PovGameState(
-            GameState(
-                grid=np.array(
-                    [
-                        [1, 1, 1, 1, 1],
-                        [1, 1, 1, 1, 1],
-                        [1, 1, 1, 1, 1],
-                        [1, 0, 0, 0, 1],
-                        [1, 1, 1, 1, 1],
-                    ],
-                    dtype=bool,
-                ),
-                players=(Player(3, 0, True), Player(3, 4, True)),
+            game_state=from_2d_game_state(
+                GameState2D(
+                    grid=np.array(
+                        [
+                            [1, 1, 1, 1, 1],
+                            [1, 1, 1, 1, 1],
+                            [1, 1, 1, 1, 1],
+                            [1, 0, 0, 0, 1],
+                            [1, 1, 1, 1, 1],
+                        ],
+                        dtype=bool,
+                    ),
+                    players=(Player2D(3, 0, True), Player2D(3, 4, True)),
+                )
             ),
             hero_index=0,
+            opponent_index=1,
         ),
         expected_value=0.0,
     ),
@@ -163,77 +187,89 @@ TIE_BENCHMARKS_5X5 = [
 WIN_LOSS_BENCHMARKS_5X5 = [
     ModelBenchmark(
         pov_game_state=PovGameState(
-            GameState(
-                grid=np.array(
-                    [
-                        [1, 1, 1, 1, 1],
-                        [1, 1, 1, 1, 1],
-                        [1, 1, 1, 1, 1],
-                        [1, 1, 1, 1, 1],
-                        [1, 1, 1, 1, 0],
-                    ],
-                    dtype=bool,
-                ),
-                players=(Player(4, 3, True), Player(2, 2, True)),
+            game_state=from_2d_game_state(
+                GameState2D(
+                    grid=np.array(
+                        [
+                            [1, 1, 1, 1, 1],
+                            [1, 1, 1, 1, 1],
+                            [1, 1, 1, 1, 1],
+                            [1, 1, 1, 1, 1],
+                            [1, 1, 1, 1, 0],
+                        ],
+                        dtype=bool,
+                    ),
+                    players=(Player2D(4, 3, True), Player2D(2, 2, True)),
+                )
             ),
             hero_index=0,
+            opponent_index=1,
         ),
         expected_value=1.0,
     ),
     ModelBenchmark(
         pov_game_state=PovGameState(
-            GameState(
-                grid=np.array(
-                    [
-                        [1, 1, 1, 1, 1],
-                        [1, 1, 1, 1, 1],
-                        [1, 1, 1, 1, 1],
-                        [1, 1, 1, 1, 1],
-                        [1, 1, 1, 1, 0],
-                    ],
-                    dtype=bool,
-                ),
-                players=(Player(2, 2, True), Player(4, 3, True)),
+            game_state=from_2d_game_state(
+                GameState2D(
+                    grid=np.array(
+                        [
+                            [1, 1, 1, 1, 1],
+                            [1, 1, 1, 1, 1],
+                            [1, 1, 1, 1, 1],
+                            [1, 1, 1, 1, 1],
+                            [1, 1, 1, 1, 0],
+                        ],
+                        dtype=bool,
+                    ),
+                    players=(Player2D(2, 2, True), Player2D(4, 3, True)),
+                )
             ),
             hero_index=0,
+            opponent_index=1,
         ),
         expected_value=-1.0,
     ),
     ModelBenchmark(
         pov_game_state=PovGameState(
-            GameState(
-                grid=np.array(
-                    [
-                        [1, 1, 1, 1, 0],
-                        [1, 1, 1, 1, 1],
-                        [1, 1, 0, 1, 1],
-                        [0, 1, 0, 1, 1],
-                        [0, 1, 0, 1, 1],
-                    ],
-                    dtype=bool,
-                ),
-                players=(Player(2, 0, True), Player(0, 3, True)),
+            game_state=from_2d_game_state(
+                GameState2D(
+                    grid=np.array(
+                        [
+                            [1, 1, 1, 1, 0],
+                            [1, 1, 1, 1, 1],
+                            [1, 1, 0, 1, 1],
+                            [0, 1, 0, 1, 1],
+                            [0, 1, 0, 1, 1],
+                        ],
+                        dtype=bool,
+                    ),
+                    players=(Player2D(2, 0, True), Player2D(0, 3, True)),
+                )
             ),
             hero_index=0,
+            opponent_index=1,
         ),
         expected_value=1.0,
     ),
     ModelBenchmark(
         pov_game_state=PovGameState(
-            GameState(
-                grid=np.array(
-                    [
-                        [1, 1, 1, 1, 0],
-                        [1, 1, 1, 1, 1],
-                        [1, 1, 0, 1, 1],
-                        [0, 1, 0, 1, 1],
-                        [0, 1, 0, 1, 1],
-                    ],
-                    dtype=bool,
-                ),
-                players=(Player(0, 3, True), Player(2, 0, True)),
+            game_state=from_2d_game_state(
+                GameState2D(
+                    grid=np.array(
+                        [
+                            [1, 1, 1, 1, 0],
+                            [1, 1, 1, 1, 1],
+                            [1, 1, 0, 1, 1],
+                            [0, 1, 0, 1, 1],
+                            [0, 1, 0, 1, 1],
+                        ],
+                        dtype=bool,
+                    ),
+                    players=(Player2D(0, 3, True), Player2D(2, 0, True)),
+                )
             ),
             hero_index=0,
+            opponent_index=1,
         ),
         expected_value=-1.0,
     ),
@@ -262,8 +298,6 @@ def run_benchmark(
             b.expected_hero_dirs,
         )
 
-        opponent_index = 0 if pov_game_state.hero_index == 1 else 1
-
         is_tactic = expected_hero_dirs is not None
 
         if is_tactic:
@@ -281,9 +315,11 @@ def run_benchmark(
 
             directions = [None, None]
             directions[pov_game_state.hero_index] = hero_dir
-            directions[opponent_index] = opposing_dirs[i]
+            directions[pov_game_state.opponent_index] = opposing_dirs[i]
 
-            pov_game_state = PovGameState(next(pov_game_state.game_state, directions), pov_game_state.hero_index)
+            pov_game_state = PovGameState(
+                next(pov_game_state.game_state, directions), pov_game_state.hero_index, pov_game_state.opponent_index
+            )
 
             status_info = get_status(pov_game_state.game_state)
 
@@ -307,13 +343,16 @@ def run_model_benchmark(bench: ModelBenchmark, model: TronModel, run_symmetries=
     if run_symmetries:
         pov_game_states = []
 
+        game_2d = from_bitboard(bench.pov_game_state.game_state)
+
         for do_lr_flip, n_rot_90 in itertools.product([True, False], range(4)):
             pov_game_states.append(
                 PovGameState(
-                    GameState.transform(
-                        bench.pov_game_state.game_state, do_lr_flip, n_rot_90
+                    from_2d_game_state(
+                        GameState2D.transform(game_2d, do_lr_flip, n_rot_90)
                     ),
                     bench.pov_game_state.hero_index,
+                    bench.pov_game_state.opponent_index,
                 )
             )
 
@@ -340,10 +379,12 @@ def match(p1_dir_fn: callable, p2_dir_fn: callable, starting_positions=list[Game
 
         white_pos = starting_positions[i]
 
+        if len(white_pos.players) > 2:
+            raise NotImplementedError()
+         
         black_players = (white_pos.players[1], white_pos.players[0])
-        black_grid = white_pos.grid.copy()
 
-        black_pos = GameState(black_grid, black_players)
+        black_pos = GameState(white_pos.num_rows, white_pos.num_cols, white_pos.board, black_players)
 
         for start_game_state in [white_pos, black_pos]:
 
@@ -353,8 +394,8 @@ def match(p1_dir_fn: callable, p2_dir_fn: callable, starting_positions=list[Game
 
             while status_info.status == GameStatus.IN_PROGRESS:
 
-                p1_dir = p1_dir_fn(PovGameState(game_state, hero_index=0))
-                p2_dir = p2_dir_fn(PovGameState(game_state, hero_index=1))
+                p1_dir = p1_dir_fn(PovGameState(game_state, hero_index=0, opponent_index=1))
+                p2_dir = p2_dir_fn(PovGameState(game_state, hero_index=1, opponent_index=0))
 
                 game_state = next(game_state, directions=(p1_dir, p2_dir))
 

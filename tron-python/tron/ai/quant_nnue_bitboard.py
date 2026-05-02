@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from warnings import warn
 from tron.ai.tron_model import TronModel
 
-from tron.bitboard import PovBitBoardGameState, get_wall_indices
+from tron.game import PovGameState, get_wall_indices
 
 
 # --- 2. Define the efficient‐updatable net ---
@@ -23,18 +23,12 @@ class NnueTronModel(TronModel):
         self.num_rows = num_rows
         self.num_cols = num_cols
         self.num_cells = num_rows * num_cols
-        self.reset_acc()
 
     def load_state_dict(self, state_dict, strict: bool = True):
 
         # Call super and return the IncompatibleKeys namedtuple
         rv = super().load_state_dict(state_dict, strict=strict)
 
-        warn(
-            "Resetting accumulator after loading state dict. "
-            "This stateful accumulator stuff is bad."
-        )
-        self.reset_acc()
 
         return rv
 
@@ -79,7 +73,7 @@ class NnueTronModel(TronModel):
         return (self.num_cells * 2) + idx
 
     # TODO: Make static?
-    def get_active_indices(self, pov_game_state: PovBitBoardGameState) -> list[int]:
+    def get_active_indices(self, pov_game_state: PovGameState) -> list[int]:
 
         if len(pov_game_state.game_state.players) != 2:
             raise NotImplementedError()
@@ -92,13 +86,13 @@ class NnueTronModel(TronModel):
             game_state.players[pov_game_state.opponent_index].idx
         )
 
-        indices = [hero_emb_index, opponent_emb_index] + get_wall_indices(pov_game_state.board)
+        indices = [hero_emb_index, opponent_emb_index] + get_wall_indices(pov_game_state.game_state)
 
 
 
         return indices
 
-    def get_model_input(self, pov_game_states: list[PovBitBoardGameState]) -> torch.Tensor:
+    def get_model_input(self, pov_game_states: list[PovGameState]) -> torch.Tensor:
 
         accs = []
 
@@ -109,6 +103,10 @@ class NnueTronModel(TronModel):
             accs.append(self.init_accumulator(active_indices))
 
         return torch.stack(accs)
+    
+    def run_inference(self, pov_game_state: PovGameState) -> float:
+
+        raise NotImplementedError("Should be using quantized version.")
 
 
 class QuantizedNnueTronModel(TronModel):
@@ -154,7 +152,7 @@ class QuantizedNnueTronModel(TronModel):
 
         return acc
 
-    def run_inference(self, pov_game_state: PovBitBoardGameState) -> float:
+    def run_inference(self, pov_game_state: PovGameState) -> float:
 
         acc = self.initilize_acc(pov_game_state)
 
@@ -195,5 +193,5 @@ class QuantizedNnueTronModel(TronModel):
 
         return acc
 
-    def get_model_input(self, pov_game_states: list[PovBitBoardGameState]) -> torch.Tensor:
+    def get_model_input(self, pov_game_states: list[PovGameState]) -> torch.Tensor:
         raise RuntimeError("Quantized NNUE is not used for training.")

@@ -2,10 +2,10 @@ import zmq
 import numpy as np
 from tron.io import tron_pb2  # This is the generated file from your .proto schema
 
-from tron.game import  GameState, Player
+from tron.game_2d import GameState2D, Player2D
 
-def to_proto(game_data: list[list[GameState]]):
-    # Create an instance of GameState
+def to_proto(game_data: list[list[GameState2D]]):
+    # Create an instance of GameState2D
     games_pb = tron_pb2.Games()
     
 
@@ -17,7 +17,7 @@ def to_proto(game_data: list[list[GameState]]):
 
             game_state_pb = game_pb.game_states.add()
         
-            # Fill the grid into the GameState message
+            # Fill the grid into the GameState2D message
             for row in game_state.grid:
                 grid_row = game_state_pb.grid.add()  # Add a new row
                 grid_row.cells.extend(row.tolist())         # Extend the row with the boolean values
@@ -34,7 +34,7 @@ def to_proto(game_data: list[list[GameState]]):
 def from_proto(serialized_data):
 
 
-    # Deserialize the byte string back into a GameState message
+    # Deserialize the byte string back into a GameState2D message
     games_pb = tron_pb2.Games()
     games_pb.ParseFromString(serialized_data)
 
@@ -55,9 +55,9 @@ def from_proto(serialized_data):
 
             players = []
             for player_pb in game_state_pb.players:
-                players.append(Player(player_pb.row, player_pb.col, player_pb.can_move))
+                players.append(Player2D(player_pb.row, player_pb.col, player_pb.can_move))
 
-            game.append(GameState(grid, tuple(players)))
+            game.append(GameState2D(grid, tuple(players)))
         game_data.append(game) 
 
     return game_data

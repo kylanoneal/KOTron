@@ -278,7 +278,7 @@ def basic_minimax(
     if depth == 0:
         assert is_maximizing_player
         return MinimaxResult(
-            context.eval_fn(PovGameState(game_state, maximizing_player)), None
+            context.eval_fn(PovGameState(game_state, maximizing_player, minimizing_player)), None
         )
 
     if is_maximizing_player:
