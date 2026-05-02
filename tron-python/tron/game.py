@@ -158,8 +158,7 @@ class GameState:
 
         if len(self.players) != 2:
             raise NotImplementedError()
-        
-        
+
     def __str__(self):
 
         repr_str = ""
@@ -416,17 +415,19 @@ def next(game: GameState, directions: tuple[Direction]) -> GameState:
         next_players.append(Player(next_row, next_col, next_can_move))
 
     # Update grid and handle case where 2 or more players try to occupy the same square
-    for i in range(len(next_players) - 1):
+    for i in range(len(next_players)):
 
         pi: Player = next_players[i]
         next_grid[pi.row, pi.col] = True
 
         if pi.can_move:
             for j in range(i + 1, len(next_players)):
+
                 pj: Player = next_players[j]
 
                 if pj.can_move:
                     if pi.row == pj.row and pi.col == pj.col:
+                        # print(f"{i=}, {j=}")
                         next_players[i] = Player(pi.row, pi.col, can_move=False)
                         next_players[j] = Player(pj.row, pj.col, can_move=False)
 

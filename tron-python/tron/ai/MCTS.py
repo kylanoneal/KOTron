@@ -103,19 +103,15 @@ class Node:
                             self.parent.acc, self.context.hero_index, self.context.opponent_index, self.parent.game_state, next_game_state
                         )
 
-                    # Do new eval - change eval_fn to take in a MCTS node, so it has access to accumulator,
-                    # and anything else it might need (more than just the PovGameState)
-                    #
-
-                    # Do status check on next_game_state. Assign eval to win /tie reward if terminal
-                    # OTHERWISE:
-                    eval = self.context.eval_fn(child_node)
+                    # NOTE: Negate hero perspective evaluation
+                    eval = -self.context.eval_fn(child_node)
 
                 elif next_status.status == GameStatus.WINNER:
 
+                    # NOTE: This eval is opponent perspective
                     eval = (
                         self.context.win_magnitude
-                        if next_status.winner_index == self.context.hero_index
+                        if next_status.winner_index == self.context.opponent_index
                         else self.context.win_magnitude * -1
                     )
 
@@ -124,6 +120,7 @@ class Node:
                 else:
                     raise ValueError()
 
+                # TODO: Janky post init setting eval and total reward
                 child_node.eval = eval
                 child_node.total_reward = eval
                 self.children.append(child_node)

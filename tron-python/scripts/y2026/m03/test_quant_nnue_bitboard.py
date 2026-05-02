@@ -17,7 +17,17 @@ import tron
 
 from torch.utils.tensorboard import SummaryWriter
 
+
 from tron.game import GameState, GameStatus, StatusInfo, Direction
+from tron.bitboard import (
+    from_bitboard,
+    from_2d_game_state,
+    BitBoardGameState,
+    BitBoardPlayer,
+    PovBitBoardGameState
+)
+
+from tron.bitboard import next as bitboard_next
 
 # from tron.gui.utility_gui import show_game_state
 
@@ -307,7 +317,7 @@ def main():
 
     for g in match_starts_proto:
         assert len(g) == 1
-        match_starting_positions.append(g[0])
+        match_starting_positions.append(from_2d_game_state(g[0]))
 
     match_contexts = [
         MatchContext(model_d1_bc, fresh_model_d1_bc, match_starting_positions),
@@ -414,16 +424,26 @@ def main():
             # NOTE: Just resetting it everygame cause why not
             model.reset_acc()
 
-            game_state = get_start_position(
-                NUM_ROWS, NUM_COLS, P_NEUTRAL_START, P_OBSTACLES, OBSTACLE_DENSITY_RANGE
+            game_state: BitBoardGameState = from_2d_game_state(
+                get_start_position(
+                    NUM_ROWS,
+                    NUM_COLS,
+                    P_NEUTRAL_START,
+                    P_OBSTACLES,
+                    OBSTACLE_DENSITY_RANGE,
+                )
             )
 
             game_status: StatusInfo = tron.get_status(game_state)
 
-            current_game: list[GameState] = [game_state]
+            current_game: list[BitBoardGameState] = [game_state]
 
-            p1_initial_acc = quant_model.initilize_acc(PovGameState(game_state, 0))
-            p2_initial_acc = quant_model.initilize_acc(PovGameState(game_state, 1))
+            p1_initial_acc = quant_model.initilize_acc(
+                PovBitBoardGameState(game_state, 0)
+            )
+            p2_initial_acc = quant_model.initilize_acc(
+                PovBitBoardGameState(game_state, 1)
+            )
 
             next_p1_root = next_p2_root = None
             while game_status.status == GameStatus.IN_PROGRESS:
@@ -456,7 +476,7 @@ def main():
                 # p1_dir = choose_direction_random(game_state, 0)
                 # p2_dir = choose_direction_random(game_state, 1)
 
-                game_state = tron.next(game_state, directions=(p1_dir, p2_dir))
+                game_state = bitboard_next(game_state, directions=(p1_dir, p2_dir))
 
                 current_game.append(game_state)
 
@@ -475,7 +495,13 @@ def main():
                 # print("P2 win")
 
         # Serialize game data
-        serialized_data = to_proto(games)
+
+        games_2d = []
+
+        for game in games:
+            games_2d.append([from_bitboard(_2d_gs) for _2d_gs in game])
+
+        serialized_data = to_proto(games_2d)
 
         # Save the serialized data to a file.
         with open(

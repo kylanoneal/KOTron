@@ -1,296 +1,296 @@
-from abc import ABC, abstractmethod
-import numpy as np
-
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
+# from abc import ABC, abstractmethod
+# import numpy as np
+
+# import torch
+# import torch.nn as nn
+# import torch.nn.functional as F
 
-from warnings import warn
-from tron import GameState, Player
-from tron.ai.training import PovGameState
-from tron.ai.tron_model import TronModel
+# from warnings import warn
+# from tron import GameState, Player
+# from tron.ai.training import PovGameState
+# from tron.ai.tron_model import TronModel
 
 
-# --- 2. Define the efficient‐updatable net ---
-class NnueTronModel(TronModel):
-    def __init__(self, num_rows, num_cols, acc_dim=128):
-        super().__init__()
-        # Embedding table: feature → acc_dim vector
-        self.embedding = nn.Embedding(num_rows * num_cols * 3, acc_dim)
-        # Tiny MLP on top of the accumulator
-        self.fc1 = nn.Linear(acc_dim, 1)
+# # --- 2. Define the efficient‐updatable net ---
+# class NnueTronModel(TronModel):
+#     def __init__(self, num_rows, num_cols, acc_dim=128):
+#         super().__init__()
+#         # Embedding table: feature → acc_dim vector
+#         self.embedding = nn.Embedding(num_rows * num_cols * 3, acc_dim)
+#         # Tiny MLP on top of the accumulator
+#         self.fc1 = nn.Linear(acc_dim, 1)
 
-        self.num_rows = num_rows
-        self.num_cols = num_cols
-        self.num_cells = num_rows * num_cols
-        self.reset_acc()
-
-    def load_state_dict(self, state_dict, strict: bool = True):
+#         self.num_rows = num_rows
+#         self.num_cols = num_cols
+#         self.num_cells = num_rows * num_cols
+#         self.reset_acc()
+
+#     def load_state_dict(self, state_dict, strict: bool = True):
 
-        # Call super and return the IncompatibleKeys namedtuple
-        rv = super().load_state_dict(state_dict, strict=strict)
-
-        warn(
-            "Resetting accumulator after loading state dict. "
-            "This stateful accumulator stuff is bad."
-        )
-        self.reset_acc()
-
-        return rv
-
-    def init_accumulator(self, active_indices: list[int]):
-        """
-        Build accumulator from scratch by summing embeddings
-        active_indices: list or 1D tensor of feature indices that are “on”
-        """
-        active_indices = torch.tensor(active_indices, dtype=torch.long)
-        emb = self.embedding(active_indices)  # [#active × acc_dim]
-        return emb.sum(dim=0)  # → [acc_dim]
-
-    def update_acc(self, acc, to_remove, to_add):
-        """
-        Efficient delta‐update:
-          acc ← acc - E[to_remove] + E[to_add]
-        to_remove, to_add: single indices or lists of indices
-        """
-        # wrap into LongTensor
-        rem = torch.tensor(to_remove, dtype=torch.long)
-        add = torch.tensor(to_add, dtype=torch.long)
-
-        emb_rem = self.embedding(rem).sum(dim=0)
-        emb_add = self.embedding(add).sum(dim=0)
-        return acc - emb_rem + emb_add
+#         # Call super and return the IncompatibleKeys namedtuple
+#         rv = super().load_state_dict(state_dict, strict=strict)
+
+#         warn(
+#             "Resetting accumulator after loading state dict. "
+#             "This stateful accumulator stuff is bad."
+#         )
+#         self.reset_acc()
+
+#         return rv
+
+#     def init_accumulator(self, active_indices: list[int]):
+#         """
+#         Build accumulator from scratch by summing embeddings
+#         active_indices: list or 1D tensor of feature indices that are “on”
+#         """
+#         active_indices = torch.tensor(active_indices, dtype=torch.long)
+#         emb = self.embedding(active_indices)  # [#active × acc_dim]
+#         return emb.sum(dim=0)  # → [acc_dim]
+
+#     def update_acc(self, acc, to_remove, to_add):
+#         """
+#         Efficient delta‐update:
+#           acc ← acc - E[to_remove] + E[to_add]
+#         to_remove, to_add: single indices or lists of indices
+#         """
+#         # wrap into LongTensor
+#         rem = torch.tensor(to_remove, dtype=torch.long)
+#         add = torch.tensor(to_add, dtype=torch.long)
+
+#         emb_rem = self.embedding(rem).sum(dim=0)
+#         emb_add = self.embedding(add).sum(dim=0)
+#         return acc - emb_rem + emb_add
 
-    def forward(self, acc):
-        # 3. Clamp and run MLP
-        # x = torch.clamp(acc, min=0.0, max=127.0)  # mimic 8-bit clamp
+#     def forward(self, acc):
+#         # 3. Clamp and run MLP
+#         # x = torch.clamp(acc, min=0.0, max=127.0)  # mimic 8-bit clamp
 
-        x = torch.clamp(acc, min=0.0, max=1.0)
-        out = self.fc1(x)
-        return out.squeeze(-1)
+#         x = torch.clamp(acc, min=0.0, max=1.0)
+#         out = self.fc1(x)
+#         return out.squeeze(-1)
 
-    def reset_acc(self):
+#     def reset_acc(self):
 
-        game_state = GameState.new_game(
-            num_players=2,
-            num_rows=self.num_rows,
-            num_cols=self.num_cols,
-            random_starts=True,
-        )
+#         game_state = GameState.new_game(
+#             num_players=2,
+#             num_rows=self.num_rows,
+#             num_cols=self.num_cols,
+#             random_starts=True,
+#         )
 
-        hero_index = 0
+#         hero_index = 0
 
-        active_indices = self.get_active_indices(PovGameState(game_state, hero_index))
+#         active_indices = self.get_active_indices(PovGameState(game_state, hero_index))
 
-        self.acc = self.init_accumulator(active_indices)
-        self.prev_game_state = game_state
-        self.prev_hero_index = hero_index
+#         self.acc = self.init_accumulator(active_indices)
+#         self.prev_game_state = game_state
+#         self.prev_hero_index = hero_index
 
-    def emb_idx_wall(self, row, col):
-        return row * self.num_cols + col
+#     def emb_idx_wall(self, row, col):
+#         return row * self.num_cols + col
 
-    def emb_idx_hero_head(self, row, col):
-        return (self.num_cells) + (row * self.num_cols + col)
+#     def emb_idx_hero_head(self, row, col):
+#         return (self.num_cells) + (row * self.num_cols + col)
 
-    def emb_idx_opponent_head(self, row, col):
-        return (self.num_cells * 2) + (row * self.num_cols + col)
+#     def emb_idx_opponent_head(self, row, col):
+#         return (self.num_cells * 2) + (row * self.num_cols + col)
 
-    def run_inference(self, pov_game_state: PovGameState) -> np.ndarray:
+#     def run_inference(self, pov_game_state: PovGameState) -> np.ndarray:
 
-        with torch.no_grad():
+#         with torch.no_grad():
 
-            if len(pov_game_state.game_state.players) != 2:
-                raise NotImplementedError()
+#             if len(pov_game_state.game_state.players) != 2:
+#                 raise NotImplementedError()
 
-            num_rows, num_cols = pov_game_state.game_state.grid.shape
+#             num_rows, num_cols = pov_game_state.game_state.grid.shape
 
-            assert num_rows == self.num_rows
-            assert num_cols == self.num_cols
+#             assert num_rows == self.num_rows
+#             assert num_cols == self.num_cols
 
-            hero_index = pov_game_state.hero_index
-            opponent_index = 0 if hero_index == 1 else 1
-            game_state = pov_game_state.game_state
+#             hero_index = pov_game_state.hero_index
+#             opponent_index = 0 if hero_index == 1 else 1
+#             game_state = pov_game_state.game_state
 
-            remove_mask = self.prev_game_state.grid & (~game_state.grid)
-            add_mask = game_state.grid & (~self.prev_game_state.grid)
+#             remove_mask = self.prev_game_state.grid & (~game_state.grid)
+#             add_mask = game_state.grid & (~self.prev_game_state.grid)
 
-            # get row/col pairs for each case
-            remove_grid_indices = np.argwhere(remove_mask).tolist()
-            add_grid_indices = np.argwhere(add_mask).tolist()
+#             # get row/col pairs for each case
+#             remove_grid_indices = np.argwhere(remove_mask).tolist()
+#             add_grid_indices = np.argwhere(add_mask).tolist()
 
-            # get emb
-            remove_emb_indices = [
-                self.emb_idx_wall(row, col) for row, col in remove_grid_indices
-            ]
-            add_emb_indices = [
-                self.emb_idx_wall(row, col) for row, col in add_grid_indices
-            ]
+#             # get emb
+#             remove_emb_indices = [
+#                 self.emb_idx_wall(row, col) for row, col in remove_grid_indices
+#             ]
+#             add_emb_indices = [
+#                 self.emb_idx_wall(row, col) for row, col in add_grid_indices
+#             ]
 
-            # Previous state's player heads
-            prev_hero_player = self.prev_game_state.players[self.prev_hero_index]
-            prev_hero_emb_index = self.emb_idx_hero_head(
-                prev_hero_player.row, prev_hero_player.col
-            )
+#             # Previous state's player heads
+#             prev_hero_player = self.prev_game_state.players[self.prev_hero_index]
+#             prev_hero_emb_index = self.emb_idx_hero_head(
+#                 prev_hero_player.row, prev_hero_player.col
+#             )
 
-            prev_opponent_index = 0 if self.prev_hero_index == 1 else 1
-            prev_opponent_player = self.prev_game_state.players[prev_opponent_index]
-            prev_opponent_emb_index = self.emb_idx_opponent_head(
-                prev_opponent_player.row, prev_opponent_player.col
-            )
+#             prev_opponent_index = 0 if self.prev_hero_index == 1 else 1
+#             prev_opponent_player = self.prev_game_state.players[prev_opponent_index]
+#             prev_opponent_emb_index = self.emb_idx_opponent_head(
+#                 prev_opponent_player.row, prev_opponent_player.col
+#             )
 
-            remove_emb_indices.extend([prev_hero_emb_index, prev_opponent_emb_index])
-            # Current state's player heads
+#             remove_emb_indices.extend([prev_hero_emb_index, prev_opponent_emb_index])
+#             # Current state's player heads
 
-            hero_player = game_state.players[hero_index]
-            hero_emb_index = self.emb_idx_hero_head(hero_player.row, hero_player.col)
+#             hero_player = game_state.players[hero_index]
+#             hero_emb_index = self.emb_idx_hero_head(hero_player.row, hero_player.col)
 
-            opponent_player = game_state.players[opponent_index]
-            opponent_emb_index = self.emb_idx_opponent_head(
-                opponent_player.row, opponent_player.col
-            )
+#             opponent_player = game_state.players[opponent_index]
+#             opponent_emb_index = self.emb_idx_opponent_head(
+#                 opponent_player.row, opponent_player.col
+#             )
 
-            add_emb_indices.extend([hero_emb_index, opponent_emb_index])
+#             add_emb_indices.extend([hero_emb_index, opponent_emb_index])
 
-            # Update accumulator and prev variables
-            self.acc = self.update_acc(self.acc, remove_emb_indices, add_emb_indices)
+#             # Update accumulator and prev variables
+#             self.acc = self.update_acc(self.acc, remove_emb_indices, add_emb_indices)
 
-            self.prev_game_state = game_state
-            self.prev_hero_index = hero_index
+#             self.prev_game_state = game_state
+#             self.prev_hero_index = hero_index
 
-            return self(self.acc).item()
+#             return self(self.acc).item()
 
-    # TODO: Make static?
-    def get_active_indices(self, pov_game_state: PovGameState) -> list[int]:
+#     # TODO: Make static?
+#     def get_active_indices(self, pov_game_state: PovGameState) -> list[int]:
 
-        if len(pov_game_state.game_state.players) != 2:
-            raise NotImplementedError()
+#         if len(pov_game_state.game_state.players) != 2:
+#             raise NotImplementedError()
 
-        hero_index = pov_game_state.hero_index
-        opponent_index = 0 if hero_index == 1 else 1
-        game_state = pov_game_state.game_state
+#         hero_index = pov_game_state.hero_index
+#         opponent_index = 0 if hero_index == 1 else 1
+#         game_state = pov_game_state.game_state
 
-        num_rows, num_cols = game_state.grid.shape
+#         num_rows, num_cols = game_state.grid.shape
 
-        assert num_rows == self.num_rows
-        assert num_cols == self.num_cols
+#         assert num_rows == self.num_rows
+#         assert num_cols == self.num_cols
 
-        hero_player = game_state.players[hero_index]
-        hero_emb_index = self.emb_idx_hero_head(hero_player.row, hero_player.col)
+#         hero_player = game_state.players[hero_index]
+#         hero_emb_index = self.emb_idx_hero_head(hero_player.row, hero_player.col)
 
-        opponent_player = game_state.players[opponent_index]
-        opponent_emb_index = self.emb_idx_opponent_head(
-            opponent_player.row, opponent_player.col
-        )
+#         opponent_player = game_state.players[opponent_index]
+#         opponent_emb_index = self.emb_idx_opponent_head(
+#             opponent_player.row, opponent_player.col
+#         )
 
-        indices = [hero_emb_index, opponent_emb_index]
+#         indices = [hero_emb_index, opponent_emb_index]
 
-        for row in range(num_rows):
-            for col in range(num_cols):
+#         for row in range(num_rows):
+#             for col in range(num_cols):
 
-                if game_state.grid[row][col]:
-                    indices.append(self.emb_idx_wall(row, col))
+#                 if game_state.grid[row][col]:
+#                     indices.append(self.emb_idx_wall(row, col))
 
-        return indices
+#         return indices
 
-    def get_model_input(self, pov_game_states: list[PovGameState]) -> torch.Tensor:
+#     def get_model_input(self, pov_game_states: list[PovGameState]) -> torch.Tensor:
 
-        accs = []
+#         accs = []
 
-        for pov_game_state in pov_game_states:
+#         for pov_game_state in pov_game_states:
 
-            active_indices = self.get_active_indices(pov_game_state)
+#             active_indices = self.get_active_indices(pov_game_state)
 
-            accs.append(self.init_accumulator(active_indices))
+#             accs.append(self.init_accumulator(active_indices))
 
-        return torch.stack(accs)
+#         return torch.stack(accs)
 
 
-class QuantizedNnueTronModel(TronModel):
+# class QuantizedNnueTronModel(TronModel):
 
-    def __init__(self, model: NnueTronModel, scale=256):
+#     def __init__(self, model: NnueTronModel, scale=256):
 
-        super().__init__()
-        self.raw_model = model
+#         super().__init__()
+#         self.raw_model = model
 
-        self.scale = scale
+#         self.scale = scale
 
-        self.embed_weights = torch.round(model.embedding.weight * scale).to(torch.int32)
+#         self.embed_weights = torch.round(model.embedding.weight * scale).to(torch.int32)
 
-        self.linear_weights = torch.round(model.fc1.weight * scale).to(torch.int32)
-        self.linear_bias = torch.round(model.fc1.bias * scale * scale).to(torch.int32)
+#         self.linear_weights = torch.round(model.fc1.weight * scale).to(torch.int32)
+#         self.linear_bias = torch.round(model.fc1.bias * scale * scale).to(torch.int32)
 
 
 
-    def run_inference_acc(self, acc) -> float:
+#     def run_inference_acc(self, acc) -> float:
 
-        # 2. Clamp to [0, scale]
-        acc = torch.clamp(acc, 0, self.scale)
-        # print(f"After clamp: {acc.sum().item()/ 1024=}")
+#         # 2. Clamp to [0, scale]
+#         acc = torch.clamp(acc, 0, self.scale)
+#         # print(f"After clamp: {acc.sum().item()/ 1024=}")
 
-        acc = acc.to(dtype=torch.int32)
+#         acc = acc.to(dtype=torch.int32)
 
-        # print(f"After int32 cast: {acc.sum().item()/ 1024=}")
+#         # print(f"After int32 cast: {acc.sum().item()/ 1024=}")
 
-        # 3. Linear layer in integer domain
-        #    (1 x acc_dim) @ (acc_dim) -> scalar
-        y_int = (self.linear_weights @ acc) + self.linear_bias  # still int32
+#         # 3. Linear layer in integer domain
+#         #    (1 x acc_dim) @ (acc_dim) -> scalar
+#         y_int = (self.linear_weights @ acc) + self.linear_bias  # still int32
 
-        # print(f"After linear: {y_int.sum().item()/ 1024 / 1024=}")
+#         # print(f"After linear: {y_int.sum().item()/ 1024 / 1024=}")
 
-        # 4. Rescale back to float
-        y = y_int.float() / (self.scale * self.scale)
+#         # 4. Rescale back to float
+#         y = y_int.float() / (self.scale * self.scale)
 
-        return y.item()
+#         return y.item()
 
-    def initilize_acc(self, pov_game_state):
+#     def initilize_acc(self, pov_game_state):
 
-        indices = self.raw_model.get_active_indices(pov_game_state)
-        # 1. Sum embeddings (int accumulator)
-        acc = self.embed_weights[indices].sum(dim=0)  # [acc_dim], int32
+#         indices = self.raw_model.get_active_indices(pov_game_state)
+#         # 1. Sum embeddings (int accumulator)
+#         acc = self.embed_weights[indices].sum(dim=0)  # [acc_dim], int32
 
-        return acc
+#         return acc
     
 
-    def run_inference(self, pov_game_state: PovGameState) -> float:
+#     def run_inference(self, pov_game_state: PovGameState) -> float:
 
-        acc = self.initilize_acc(pov_game_state)
+#         acc = self.initilize_acc(pov_game_state)
         
-        return self.run_inference_acc(acc)
+#         return self.run_inference_acc(acc)
 
-    def update_acc(
-        self,
-        prev_acc,
-        hero_index: int,
-        opponent_index: int,
-        prev_game_state,
-        new_game_state,
-    ):
+#     def update_acc(
+#         self,
+#         prev_acc,
+#         hero_index: int,
+#         opponent_index: int,
+#         prev_game_state,
+#         new_game_state,
+#     ):
 
-        prev_hero = prev_game_state.players[hero_index]
-        prev_oppo = prev_game_state.players[opponent_index]
+#         prev_hero = prev_game_state.players[hero_index]
+#         prev_oppo = prev_game_state.players[opponent_index]
 
-        new_hero = new_game_state.players[hero_index]
-        new_oppo = new_game_state.players[opponent_index]
+#         new_hero = new_game_state.players[hero_index]
+#         new_oppo = new_game_state.players[opponent_index]
 
-        subtract_indices = [
-            self.raw_model.emb_idx_hero_head(prev_hero.row, prev_hero.col),
-            self.raw_model.emb_idx_opponent_head(prev_oppo.row, prev_oppo.col),
-        ]
+#         subtract_indices = [
+#             self.raw_model.emb_idx_hero_head(prev_hero.row, prev_hero.col),
+#             self.raw_model.emb_idx_opponent_head(prev_oppo.row, prev_oppo.col),
+#         ]
 
-        add_indices = [
-            self.raw_model.emb_idx_wall(new_hero.row, new_hero.col),
-            self.raw_model.emb_idx_wall(new_oppo.row, new_oppo.col),
-            self.raw_model.emb_idx_hero_head(new_hero.row, new_hero.col),
-            self.raw_model.emb_idx_opponent_head(new_oppo.row, new_oppo.col),
-        ]
+#         add_indices = [
+#             self.raw_model.emb_idx_wall(new_hero.row, new_hero.col),
+#             self.raw_model.emb_idx_wall(new_oppo.row, new_oppo.col),
+#             self.raw_model.emb_idx_hero_head(new_hero.row, new_hero.col),
+#             self.raw_model.emb_idx_opponent_head(new_oppo.row, new_oppo.col),
+#         ]
 
-        acc = (
-            prev_acc
-            - self.embed_weights[subtract_indices].sum(dim=0)
-            + self.embed_weights[add_indices].sum(dim=0)
-        )
+#         acc = (
+#             prev_acc
+#             - self.embed_weights[subtract_indices].sum(dim=0)
+#             + self.embed_weights[add_indices].sum(dim=0)
+#         )
 
-        return acc
+#         return acc
 
-    def get_model_input(self, pov_game_states: list[PovGameState]) -> torch.Tensor:
-        raise RuntimeError("Quantized NNUE is not used for training.")
+#     def get_model_input(self, pov_game_states: list[PovGameState]) -> torch.Tensor:
+#         raise RuntimeError("Quantized NNUE is not used for training.")
