@@ -31,8 +31,8 @@ class GameState2D:
     players: tuple[Player2D]
 
     # post_init is safe but slow
-    # def __post_init__(self):
-    def validate_game_state(self):
+    def __post_init__(self):
+    # def validate_game_state(self):
         # 1. Validate players container
         if not isinstance(self.players, tuple):
             raise TypeError(
@@ -63,6 +63,7 @@ class GameState2D:
                     f"got {type(player).__name__}"
                 )
 
+        for idx, player in enumerate(self.players):
             # 3b. Bounds check
             if not (0 <= player.row < num_rows):
                 raise IndexError(
@@ -294,7 +295,6 @@ def get_possible_directions(game: GameState2D, player_index):
 #     return GameState2D.next(game, direction_updates)
 
 
-@staticmethod
 def next(game: GameState2D, directions: tuple[Direction]) -> GameState2D:
 
     assert len(directions) == len(game.players)

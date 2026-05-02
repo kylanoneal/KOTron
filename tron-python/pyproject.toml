@@ -31,3 +31,18 @@ classifiers = [
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["*"]
+
+[tool.pytest.ini_options]
+addopts = [
+    "--ignore=scripts",
+    "--cov=tron",
+    "--cov-report=term-missing",
+    "--cov-report=html",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["tron"]
+
+[tool.coverage.report]
+show_missing = true
