@@ -2,27 +2,22 @@ syntax = "proto3";
 
 package tron_pb;
 
-message GridRow {
-  repeated bool cells = 1; // Each row is a sequence of booleans.
-}
-
 message Player {
-  int32 row = 1;
-  int32 col = 2;
-  bool can_move = 3;
+  int32 idx = 1;
+  bool can_move = 2;
 }
-
 
 message GameState {
-
-  repeated GridRow grid = 1;
-  repeated Player players = 2;
+  int32 num_rows = 1;
+  int32 num_cols = 2;
+  bytes board = 3;
+  repeated Player players = 4;
 }
 
 message Game {
-    repeated GameState game_states = 1;
+  repeated GameState game_states = 1;
 }
 
 message Games {
-    repeated Game games = 1;
+  repeated Game games = 1;
 }

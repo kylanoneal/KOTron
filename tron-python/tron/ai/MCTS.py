@@ -3,6 +3,7 @@ import math
 import random
 import numpy as np
 
+import torch
 from tqdm import tqdm
 from copy import deepcopy
 from typing import Optional
@@ -25,8 +26,8 @@ class MctsContext:
     hero_index: int
     opponent_index: int
     win_magnitude: float
-    eval_fn: callable
-    acc_update_fn: Optional[callable] = None
+    model: TronModel
+    use_acc: bool
 
 
 class Node:
@@ -36,10 +37,20 @@ class Node:
         game_state: GameState,
         is_hero: bool,
         prev_move: Direction,
-        eval: Optional[float] = None,
+        eval: float = None,
         parent: Optional["Node"] = None,
-        acc = None
+        acc: Optional[torch.tensor] = None,
     ):
+
+        if is_hero:
+            assert (
+                acc is None
+            ), "Hero states (only hero has chosen direction) should not have accumulator"
+            assert parent is not None
+        else:
+            if context.use_acc:
+                assert acc is not None
+
         self.context = context
         self.game_state = game_state
         self.is_hero = is_hero
@@ -56,12 +67,12 @@ class Node:
     # Consolidate the expanding of game states to a single place
     def expand(self):
 
-
         assert len(self.children) == 0, "Only should be expanding a node once"
         assert not self.is_expanded
 
         self.is_expanded = True
 
+        # Halfway state, expand to next concrete state
         if self.is_hero:
 
             assert (
@@ -84,27 +95,31 @@ class Node:
 
                 next_status = get_status(self.game_state)
 
-                child_node = Node(
-                    self.context,
-                    next_game_state,
-                    is_hero=False,
-                    prev_move=direction,
-                    eval=None,
-                    parent=self,
-                )
-
                 if next_status.status == GameStatus.IN_PROGRESS:
 
-                    # Update accumulator IF accumulator update function (?) is defined,
-                    # otherwise, have a non-op or skip the step
+                    pov_next_game_state = PovGameState(
+                        next_game_state,
+                        self.context.hero_index,
+                        self.context.opponent_index,
+                    )
+                    # NOTE: We negate hero perspective evaluation
 
-                    if self.context.acc_update_fn is not None:
-                        child_node.acc = self.context.acc_update_fn(
-                            self.parent.acc, self.context.hero_index, self.context.opponent_index, self.parent.game_state, next_game_state
+                    # Use accumulator eval
+                    if self.context.use_acc:
+
+                        updated_acc = self.context.model.update_acc(
+                            prev_acc=self.parent.acc,
+                            prev_game_state=self.parent.game_state,
+                            next_pov_game_state=pov_next_game_state,
                         )
 
-                    # NOTE: Negate hero perspective evaluation
-                    eval = -self.context.eval_fn(child_node)
+                        eval = -self.context.model.run_inference_acc(acc=updated_acc)
+                    # non-accumualtor eval
+                    else:
+
+                        eval = -self.context.model.run_inference(
+                            pov_game_state=pov_next_game_state
+                        )
 
                 elif next_status.status == GameStatus.WINNER:
 
@@ -120,11 +135,19 @@ class Node:
                 else:
                     raise ValueError()
 
-                # TODO: Janky post init setting eval and total reward
-                child_node.eval = eval
-                child_node.total_reward = eval
+                child_node = Node(
+                    self.context,
+                    next_game_state,
+                    is_hero=False,
+                    prev_move=direction,
+                    eval=eval,
+                    parent=self,
+                    acc=updated_acc,
+                )
+
                 self.children.append(child_node)
 
+        # Child states are concrete, expand to halfway state (just hero has chosen direction)
         else:
             if get_status(self.game_state).status != GameStatus.IN_PROGRESS:
                 return
@@ -235,8 +258,8 @@ def search(
     n_iterations: int,
     temp: float,
     exploration_factor: float = 2.0,
-    root=None,
-    initial_acc = None
+    root: Optional[Node] = None,
+    initial_acc: Optional[torch.tensor] = None,
 ) -> tuple[Direction, Node]:
 
     if len(game_state.players) != 2:
@@ -245,7 +268,14 @@ def search(
     if root is None:
         assert initial_acc is not None
 
-        root = Node(context, game_state, is_hero=False, prev_move=None, eval=0.0, acc=initial_acc)
+        root = Node(
+            context,
+            game_state,
+            is_hero=False,
+            prev_move=None,
+            eval=0.0,
+            acc=initial_acc,
+        )
 
     else:
         assert game_state == root.game_state

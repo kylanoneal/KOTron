@@ -9,11 +9,24 @@ from tron import Direction, GameState
 from tron.ai.tron_model import TronModel
 #from tron.ai.minimax import minimax_alpha_beta_eval_all, basic_minimax, minimax_dumb
 
+def choose_direction_random(game: GameState, player_index: int) -> Direction:
 
+    assert game.players[player_index].can_move
+
+    possible_directions = tron.get_possible_directions(game, player_index)
+
+    if len(possible_directions) == 0:
+        # Maybe return None instead?
+        return Direction.UP
+    else:
+        return random.choice(possible_directions)
+        
+        
 def choose_direction_model_naive(
     model: TronModel, game: GameState, player_index: int
 ) -> Direction:
 
+    raise NotImplementedError()
     assert game.players[player_index].can_move
 
     possible_directions = tron.get_possible_directions(game, player_index)
@@ -37,18 +50,7 @@ def choose_direction_model_naive(
 
         return possible_directions[np.argmax(evaluations)]
 
-def choose_direction_random(game: GameState, player_index: int) -> Direction:
 
-    assert game.players[player_index].can_move
-
-    possible_directions = tron.get_possible_directions(game, player_index)
-
-    if len(possible_directions) == 0:
-        # Maybe return None instead?
-        return Direction.UP
-    else:
-        return random.choice(possible_directions)
-        
 
 
 # def choose_direction_minimax(

@@ -204,11 +204,13 @@ class BitboardDataModelTests(unittest.TestCase):
 
     def test_player_and_game_state_are_frozen_value_objects(self):
         player = bit_game.Player(idx=3, can_move=True)
+        other_player = bit_game.Player(idx=5, can_move=False)
+        board = board_from_indices(player.idx, other_player.idx)
         game = bit_game.GameState(
             num_rows=2,
             num_cols=3,
-            board=board_from_indices(3),
-            players=(player,),
+            board=board,
+            players=(player, other_player),
         )
 
         with self.assertRaises(FrozenInstanceError):
@@ -219,10 +221,10 @@ class BitboardDataModelTests(unittest.TestCase):
         self.assertEqual(player, bit_game.Player(idx=3, can_move=True))
         self.assertEqual(
             game,
-            bit_game.GameState(2, 3, board_from_indices(3), (player,)),
+            bit_game.GameState(2, 3, board, (player, other_player)),
         )
         self.assertEqual(hash(player), hash(bit_game.Player(3, True)))
-        self.assertEqual(hash(game), hash(bit_game.GameState(2, 3, board_from_indices(3), (player,))))
+        self.assertEqual(hash(game), hash(bit_game.GameState(2, 3, board, (player, other_player))))
 
     def test_pov_game_state_and_status_info_store_requested_fields(self):
         game = make_bit_game(2, 2, ((0, True), (3, True)))
@@ -253,11 +255,6 @@ class BitboardDataModelTests(unittest.TestCase):
                 GameStatus.IN_PROGRESS,
                 None,
             ),
-            (
-                bit_game.GameState(2, 2, board=0, players=()),
-                GameStatus.TIE,
-                None,
-            ),
         ]
 
         for game, expected_status, expected_winner in cases:
@@ -267,12 +264,135 @@ class BitboardDataModelTests(unittest.TestCase):
                 self.assertEqual(status_info.winner_index, expected_winner)
 
     def test_get_status_uses_last_active_player_as_winner_index(self):
-        game = make_bit_game(2, 3, ((0, False), (1, True), (2, False)))
+        game = make_bit_game(2, 3, ((0, False), (1, True)))
 
         status_info = bit_game.get_status(game)
 
         self.assertIs(status_info.status, GameStatus.WINNER)
         self.assertEqual(status_info.winner_index, 1)
+
+
+class GameStatePostInitValidationTests(unittest.TestCase):
+    def test_post_init_accepts_valid_two_player_game(self):
+        game = make_bit_game(
+            3,
+            3,
+            ((idx(0, 0, 3), True), (idx(2, 2, 3), False)),
+            extra_walls=(idx(1, 1, 3),),
+        )
+
+        self.assertEqual(game.num_rows, 3)
+        self.assertEqual(game.num_cols, 3)
+        self.assertEqual(len(game.players), 2)
+
+    def test_post_init_rejects_non_tuple_players(self):
+        with self.assertRaises(TypeError):
+            bit_game.GameState(
+                num_rows=2,
+                num_cols=2,
+                board=board_from_indices(0, 3),
+                players=[bit_game.Player(0, True), bit_game.Player(3, True)],
+            )
+
+    def test_post_init_rejects_invalid_dimensions(self):
+        players = (bit_game.Player(0, True), bit_game.Player(1, True))
+
+        invalid_games = [
+            ("2", 2, board_from_indices(0, 1), TypeError),
+            (2, "2", board_from_indices(0, 1), TypeError),
+            (0, 2, 0, ValueError),
+            (2, 0, 0, ValueError),
+            (bit_game.MAX_ROWS + 1, bit_game.MAX_COLS, 0, ValueError),
+        ]
+
+        for num_rows, num_cols, board, expected_error in invalid_games:
+            with self.subTest(num_rows=num_rows, num_cols=num_cols):
+                with self.assertRaises(expected_error):
+                    bit_game.GameState(num_rows, num_cols, board, players)
+
+    def test_post_init_rejects_invalid_board_values(self):
+        players = (bit_game.Player(0, True), bit_game.Player(3, True))
+
+        invalid_games = [
+            ("not-a-board", TypeError),
+            (-1, ValueError),
+            (board_from_indices(0, 3, 4), ValueError),
+        ]
+
+        for board, expected_error in invalid_games:
+            with self.subTest(board=board):
+                with self.assertRaises(expected_error):
+                    bit_game.GameState(2, 2, board, players)
+
+    def test_post_init_rejects_non_player_entries(self):
+        with self.assertRaises(TypeError):
+            bit_game.GameState(
+                num_rows=2,
+                num_cols=2,
+                board=board_from_indices(0, 3),
+                players=("not-a-player", bit_game.Player(3, True)),
+            )
+
+    def test_post_init_rejects_player_index_out_of_bounds(self):
+        with self.assertRaises(IndexError):
+            bit_game.GameState(
+                num_rows=2,
+                num_cols=2,
+                board=board_from_indices(0, 1),
+                players=(bit_game.Player(0, True), bit_game.Player(4, True)),
+            )
+
+    def test_post_init_rejects_player_head_without_board_bit(self):
+        with self.assertRaises(ValueError):
+            bit_game.GameState(
+                num_rows=2,
+                num_cols=2,
+                board=board_from_indices(0),
+                players=(bit_game.Player(0, True), bit_game.Player(3, True)),
+            )
+
+    def test_post_init_rejects_duplicate_square_when_either_player_is_active(self):
+        for players in (
+            (bit_game.Player(0, True), bit_game.Player(0, True)),
+            (bit_game.Player(0, True), bit_game.Player(0, False)),
+            (bit_game.Player(0, False), bit_game.Player(0, True)),
+        ):
+            with self.subTest(players=players):
+                with self.assertRaises(ValueError):
+                    bit_game.GameState(2, 2, board_from_indices(0), players)
+
+    def test_post_init_allows_duplicate_square_when_both_players_are_inactive(self):
+        game = bit_game.GameState(
+            num_rows=2,
+            num_cols=2,
+            board=board_from_indices(0),
+            players=(bit_game.Player(0, False), bit_game.Player(0, False)),
+        )
+
+        self.assertEqual(
+            game.players,
+            (bit_game.Player(0, False), bit_game.Player(0, False)),
+        )
+
+    def test_post_init_currently_supports_exactly_two_players(self):
+        with self.assertRaises(NotImplementedError):
+            bit_game.GameState(
+                num_rows=2,
+                num_cols=2,
+                board=board_from_indices(0),
+                players=(bit_game.Player(0, True),),
+            )
+        with self.assertRaises(NotImplementedError):
+            bit_game.GameState(
+                num_rows=2,
+                num_cols=2,
+                board=board_from_indices(0, 1, 3),
+                players=(
+                    bit_game.Player(0, True),
+                    bit_game.Player(1, True),
+                    bit_game.Player(3, False),
+                ),
+            )
 
 
 class BitboardFunctionTests(unittest.TestCase):
@@ -284,13 +404,18 @@ class BitboardFunctionTests(unittest.TestCase):
                 self.assertEqual(bit_game.get_bit(board, index), index in {0, 5, 8})
 
     def test_get_wall_indices_returns_only_bits_inside_board_dimensions(self):
-        board = board_from_indices(0, 2, 4, 8, 12)
-        game = bit_game.GameState(3, 3, board=board, players=())
+        board = board_from_indices(0, 2, 4, 8)
+        game = bit_game.GameState(
+            3,
+            3,
+            board=board,
+            players=(bit_game.Player(0, False), bit_game.Player(8, False)),
+        )
 
         self.assertEqual(bit_game.get_wall_indices(game), [0, 2, 4, 8])
 
     def test_get_next_position_from_center(self):
-        game = make_bit_game(3, 4, ((idx(1, 1, 4), True),))
+        game = make_bit_game(3, 4, ((idx(1, 1, 4), True), (idx(2, 3, 4), False)))
         expected = {
             Direction.UP: (idx(0, 1, 4), False),
             Direction.DOWN: (idx(2, 1, 4), False),
@@ -308,22 +433,22 @@ class BitboardFunctionTests(unittest.TestCase):
     def test_get_next_position_marks_board_edges_out_of_bounds(self):
         edge_cases = [
             (
-                make_bit_game(3, 4, ((idx(0, 2, 4), True),)),
+                make_bit_game(3, 4, ((idx(0, 2, 4), True), (idx(2, 3, 4), False))),
                 Direction.UP,
                 (idx(-1, 2, 4), True),
             ),
             (
-                make_bit_game(3, 4, ((idx(2, 2, 4), True),)),
+                make_bit_game(3, 4, ((idx(2, 2, 4), True), (idx(0, 0, 4), False))),
                 Direction.DOWN,
                 (idx(3, 2, 4), True),
             ),
             (
-                make_bit_game(3, 4, ((idx(1, 0, 4), True),)),
+                make_bit_game(3, 4, ((idx(1, 0, 4), True), (idx(2, 3, 4), False))),
                 Direction.LEFT,
                 (idx(1, -1, 4), True),
             ),
             (
-                make_bit_game(3, 4, ((idx(1, 3, 4), True),)),
+                make_bit_game(3, 4, ((idx(1, 3, 4), True), (idx(0, 0, 4), False))),
                 Direction.RIGHT,
                 (idx(1, 4, 4), True),
             ),
@@ -337,13 +462,13 @@ class BitboardFunctionTests(unittest.TestCase):
                 )
 
     def test_get_next_position_rejects_unknown_direction(self):
-        game = make_bit_game(3, 3, ((4, True),))
+        game = make_bit_game(3, 3, ((4, True), (8, False)))
 
         with self.assertRaises(ValueError):
             bit_game.get_next_position(game, 0, "UP")
 
     def test_get_next_player_moves_into_open_cell(self):
-        game = make_bit_game(3, 3, ((idx(1, 1, 3), True),))
+        game = make_bit_game(3, 3, ((idx(1, 1, 3), True), (idx(2, 2, 3), False)))
 
         self.assertEqual(
             bit_game.get_next_player(game, 0, Direction.RIGHT),
@@ -354,7 +479,7 @@ class BitboardFunctionTests(unittest.TestCase):
         game = make_bit_game(
             3,
             3,
-            ((idx(1, 1, 3), True),),
+            ((idx(1, 1, 3), True), (idx(2, 2, 3), False)),
             extra_walls=(idx(1, 2, 3),),
         )
 
@@ -364,7 +489,7 @@ class BitboardFunctionTests(unittest.TestCase):
         )
 
     def test_get_next_player_stays_and_stops_when_leaving_board(self):
-        game = make_bit_game(3, 3, ((idx(0, 1, 3), True),))
+        game = make_bit_game(3, 3, ((idx(0, 1, 3), True), (idx(2, 2, 3), False)))
 
         self.assertEqual(
             bit_game.get_next_player(game, 0, Direction.UP),
@@ -372,7 +497,7 @@ class BitboardFunctionTests(unittest.TestCase):
         )
 
     def test_get_next_player_ignores_direction_for_inactive_player(self):
-        game = make_bit_game(3, 3, ((idx(1, 1, 3), False),))
+        game = make_bit_game(3, 3, ((idx(1, 1, 3), False), (idx(2, 2, 3), True)))
 
         self.assertEqual(
             bit_game.get_next_player(game, 0, Direction.RIGHT),
@@ -487,6 +612,85 @@ class BitboardFunctionTests(unittest.TestCase):
         self.assertEqual(
             bit_game.get_possible_directions(game, player_index=0),
             [Direction.DOWN, Direction.RIGHT],
+        )
+
+
+class GameStateFactoryTests(unittest.TestCase):
+    def test_new_game_returns_valid_game_state(self):
+        np.random.seed(7)
+
+        game = bit_game.GameState.new_game(
+            num_players=2,
+            num_rows=4,
+            num_cols=5,
+            random_starts=True,
+        )
+
+        self.assertIsInstance(game, bit_game.GameState)
+        self.assertEqual(game.num_rows, 4)
+        self.assertEqual(game.num_cols, 5)
+        self.assertEqual(len(game.players), 2)
+        self.assertEqual(len({player.idx for player in game.players}), 2)
+        self.assertTrue(all(player.can_move for player in game.players))
+        self.assertTrue(all(bit_game.get_bit(game.board, player.idx) for player in game.players))
+
+    def test_new_game_preserves_obstacles_from_2d_factory(self):
+        np.random.seed(11)
+
+        game = bit_game.GameState.new_game(
+            num_players=2,
+            num_rows=5,
+            num_cols=4,
+            random_starts=True,
+            obstacle_density=0.25,
+        )
+
+        occupied_count = len(bit_game.get_wall_indices(game))
+
+        self.assertGreaterEqual(occupied_count, 2)
+        self.assertLessEqual(occupied_count, 2 + int(5 * 4 * 0.25))
+
+    def test_transform_matches_game_state_2d_transform_wrapper(self):
+        game = make_bit_game(
+            2,
+            3,
+            ((idx(0, 0, 3), True), (idx(1, 2, 3), False)),
+            extra_walls=(idx(0, 2, 3),),
+        )
+        expected = bit_game.from_2d_game_state(
+            grid_game.GameState2D.transform(
+                bit_game.from_bitboard(game),
+                do_lr_flip=True,
+                n_rot_90=1,
+            )
+        )
+
+        transformed = bit_game.GameState.transform(
+            game,
+            do_lr_flip=True,
+            n_rot_90=1,
+        )
+
+        self.assertEqual(transformed, expected)
+
+    def test_transform_does_not_mutate_original_game_state(self):
+        game = make_bit_game(
+            3,
+            3,
+            ((idx(0, 1, 3), True), (idx(2, 1, 3), True)),
+            extra_walls=(idx(1, 1, 3),),
+        )
+
+        bit_game.GameState.transform(game, do_lr_flip=True, n_rot_90=1)
+
+        self.assertEqual(
+            game,
+            make_bit_game(
+                3,
+                3,
+                ((idx(0, 1, 3), True), (idx(2, 1, 3), True)),
+                extra_walls=(idx(1, 1, 3),),
+            ),
         )
 
 

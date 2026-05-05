@@ -6,7 +6,15 @@ from typing import Optional
 from torch.utils.data import Dataset, DataLoader
 
 import tron
-from tron.game import GameState, GameState2D, GameStatus, Player, Direction, from_2d_game_state, from_bitboard
+from tron.game import (
+    GameState,
+    GameState2D,
+    GameStatus,
+    Player,
+    Direction,
+    from_2d_game_state,
+    from_bitboard,
+)
 from tron.ai.tron_model import TronModel, PovGameState
 
 
@@ -112,22 +120,23 @@ def make_dataloader(
 
                 if random.random() < keep_rate:
 
-                    if do_affine:
-                        game_2d = from_bitboard(game_state)
-                        game_state_to_add = from_2d_game_state(
-                            GameState2D.transform(
-                                game_2d,
-                                do_lr_flip=random.random() > 0.5,
-                                n_rot_90=random.randrange(0, 4),
-                            )
+                    game_state_to_add = (
+                        GameState.transform(
+                            game_state,
+                            do_lr_flip=random.random() > 0.5,
+                            n_rot_90=random.randrange(0, 4),
                         )
-                    else:
-
-                        game_state_to_add = game_state
+                        if do_affine
+                        else game_state
+                    )
 
                     dataset.append(
                         (
-                            PovGameState(game_state_to_add, hero_index=player_index, opponent_index=opponent_index),
+                            PovGameState(
+                                game_state_to_add,
+                                hero_index=player_index,
+                                opponent_index=opponent_index,
+                            ),
                             np.float32(eval),
                         )
                     )

@@ -12,18 +12,6 @@ class Player2D:
     col: int
     can_move: bool
 
-    def __eq__(self, other):
-        if not isinstance(other, Player2D):
-            return False
-        return (
-            self.row == other.row
-            and self.col == other.col
-            and self.can_move == other.can_move
-        )
-
-    def __hash__(self):
-        return hash((hash(self.row), hash(self.col), hash(self.can_move)))
-
 
 @dataclass(frozen=True)
 class GameState2D:
