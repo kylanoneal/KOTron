@@ -138,27 +138,30 @@ def main():
     # args = parser.parse_args()
 
     BATCH_SIZE = 4
+    PRE_TRAIN_KEEP_RATE =  0.1 #0.0025
     KEEP_RATE = 0.5
-    LR = 0.001
+    LR = 0.01 # 0.001
+
+    ACC_DIM = 64
 
     # MCTS_ITERS = args.mcts_iters
     # TEMP = args.temp
     # EXPLR_FACTOR = args.explr_factor
 
-    MCTS_ITERS = 64
+    MCTS_ITERS = 512
     TEMP = 0.4  # 0.7
     EXPLR_FACTOR = 2.0
 
     QUANT_SCALE = 256
 
-    RUN_DESCRIPTION = "quant_5x5_debug_v1"
+    RUN_DESCRIPTION = "quant_nnue_5x5"
 
     NUM_ROWS = NUM_COLS = 5
 
     # SIM_GAME_DEPTH = 2
     WIN_REWARD = 1.5
 
-    GAMES_PER_ITER = 64
+    GAMES_PER_ITER = 256
     CHECKPOINT_EVERY_N = 5
 
     P_NEUTRAL_START = 0.75
@@ -169,14 +172,15 @@ def main():
     PLAY_MATCH_EVERY_N = 20
     N_MATCH_START_POSITIONS = 100
 
-    RUN_UID = f"L{LR}_B{BATCH_SIZE}"
+    ptkr_str = f"{PRE_TRAIN_KEEP_RATE:.4f}".replace(".", "p")
+    RUN_UID = f"L{LR}_B{BATCH_SIZE}_MCITERS{MCTS_ITERS}_PTKR{ptkr_str}_ACCDIM{ACC_DIM}"
 
     ############################################
     # INITIALIZE MODELS
     ############################################
 
     # TODO: Train a model only on deep games as well?
-    model = NnueTronModel(NUM_ROWS, NUM_COLS)
+    model = NnueTronModel(NUM_ROWS, NUM_COLS, acc_dim=ACC_DIM)
 
     # state_dict = torch.load(
     #     r"C:\Users\kylan\Documents\code\repos\KOTron\tron-python\scripts\y2025\m08\cnn\runs\20250810-224509_mcts_cnn_5x5\LR0.001_B4\checkpoints\LR0.001_B4_30.pth"
@@ -350,7 +354,7 @@ def main():
 
         # game_data = from_proto(bin_data)
 
-        dataloader = make_dataloader(games, batch_size=BATCH_SIZE, keep_rate=0.0025)
+        dataloader = make_dataloader(games, batch_size=BATCH_SIZE, keep_rate=PRE_TRAIN_KEEP_RATE)
 
         avg_loss, avg_pred_magnitude = train_loop(
             model, dataloader, optimizer, criterion, epochs=1
