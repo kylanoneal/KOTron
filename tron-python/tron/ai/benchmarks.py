@@ -1,4 +1,4 @@
-from typing import Union, Optional
+from typing import Callable, Union, Optional
 from dataclasses import dataclass
 from tqdm import tqdm
 import numpy as np
@@ -22,21 +22,21 @@ from tron.ai.tron_model import TronModel
 
 
 @dataclass(frozen=True)
-class ModelBenchmark:
+class ValueBenchmark:
 
     pov_game_state: PovGameState
     expected_value: float
 
 
 @dataclass(frozen=True)
-class Benchmark:
+class TacticalBenchmark:
 
     pov_game_state: PovGameState
     opposing_dirs: list[Direction]
     expected_hero_dirs: Optional[list[Direction]] = None
 
     @staticmethod
-    def transform(bench: "Benchmark", do_lr_flip: bool, n_rot_90: int) -> "Benchmark":
+    def transform(bench: "TacticalBenchmark", do_lr_flip: bool, n_rot_90: int) -> "TacticalBenchmark":
 
         game_2d: GameState2D = from_bitboard(bench.pov_game_state.game_state)
 
@@ -59,13 +59,15 @@ class Benchmark:
         else:
             t_expected_hero_dirs = None
 
-        return Benchmark(t_pov_game_state, t_opposing_dirs, t_expected_hero_dirs)
+        return TacticalBenchmark(t_pov_game_state, t_opposing_dirs, t_expected_hero_dirs)
+
+
 
 
 # TODO: Add "null" p1 moves - test bot's "will to live"
 # TODO: Run each benchmark 8 times? with the 8 possible symmetries
 BENCHMARKS_5X5 = [
-    Benchmark(
+    TacticalBenchmark(
         pov_game_state=PovGameState(
             game_state=from_2d_game_state(
                 GameState2D(
@@ -87,7 +89,7 @@ BENCHMARKS_5X5 = [
         ),
         opposing_dirs=([Direction.DOWN] * 4) + [Direction.LEFT] + ([Direction.UP] * 4),
     ),
-    Benchmark(
+    TacticalBenchmark(
         pov_game_state=PovGameState(
             game_state=from_2d_game_state(
                 GameState2D(
@@ -111,7 +113,7 @@ BENCHMARKS_5X5 = [
         + [Direction.DOWN]
         + ([Direction.LEFT] * 4),
     ),
-    Benchmark(
+    TacticalBenchmark(
         pov_game_state=PovGameState(
             game_state=from_2d_game_state(
                 GameState2D(
@@ -137,7 +139,7 @@ BENCHMARKS_5X5 = [
 ]
 
 TIE_BENCHMARKS_5X5 = [
-    ModelBenchmark(
+    ValueBenchmark(
         pov_game_state=PovGameState(
             game_state=from_2d_game_state(
                 GameState2D(
@@ -159,7 +161,7 @@ TIE_BENCHMARKS_5X5 = [
         ),
         expected_value=0.0,
     ),
-    ModelBenchmark(
+    ValueBenchmark(
         pov_game_state=PovGameState(
             game_state=from_2d_game_state(
                 GameState2D(
@@ -185,7 +187,7 @@ TIE_BENCHMARKS_5X5 = [
 
 # TODO: Add perspective switches
 WIN_LOSS_BENCHMARKS_5X5 = [
-    ModelBenchmark(
+    ValueBenchmark(
         pov_game_state=PovGameState(
             game_state=from_2d_game_state(
                 GameState2D(
@@ -207,7 +209,7 @@ WIN_LOSS_BENCHMARKS_5X5 = [
         ),
         expected_value=1.0,
     ),
-    ModelBenchmark(
+    ValueBenchmark(
         pov_game_state=PovGameState(
             game_state=from_2d_game_state(
                 GameState2D(
@@ -229,7 +231,7 @@ WIN_LOSS_BENCHMARKS_5X5 = [
         ),
         expected_value=-1.0,
     ),
-    ModelBenchmark(
+    ValueBenchmark(
         pov_game_state=PovGameState(
             game_state=from_2d_game_state(
                 GameState2D(
@@ -251,7 +253,7 @@ WIN_LOSS_BENCHMARKS_5X5 = [
         ),
         expected_value=1.0,
     ),
-    ModelBenchmark(
+    ValueBenchmark(
         pov_game_state=PovGameState(
             game_state=from_2d_game_state(
                 GameState2D(
@@ -276,15 +278,15 @@ WIN_LOSS_BENCHMARKS_5X5 = [
 ]
 
 
-def run_benchmark(
-    bench: Benchmark, dir_fn: callable, run_symmetries: bool = True
+def run_tactical_benchmark(
+    bench: TacticalBenchmark, dir_fn: Callable[[PovGameState], Direction], run_symmetries: bool = True
 ) -> float:
 
     if run_symmetries:
         benchmarks = []
 
         for do_lr_flip, n_rot_90 in itertools.product([True, False], range(4)):
-            benchmarks.append(Benchmark.transform(bench, do_lr_flip, n_rot_90))
+            benchmarks.append(TacticalBenchmark.transform(bench, do_lr_flip, n_rot_90))
 
     else:
         benchmarks = [bench]
@@ -338,19 +340,16 @@ def run_benchmark(
     return total_score / len(benchmarks)
 
 
-def run_model_benchmark(bench: ModelBenchmark, model: TronModel, run_symmetries=True):
+def run_value_benchmark(bench: ValueBenchmark, model: TronModel, run_symmetries=True):
 
     if run_symmetries:
         pov_game_states = []
 
-        game_2d = from_bitboard(bench.pov_game_state.game_state)
-
         for do_lr_flip, n_rot_90 in itertools.product([True, False], range(4)):
             pov_game_states.append(
                 PovGameState(
-                    from_2d_game_state(
-                        GameState2D.transform(game_2d, do_lr_flip, n_rot_90)
-                    ),
+                    GameState.transform(bench.pov_game_state.game_state, do_lr_flip, n_rot_90)
+                    ,
                     bench.pov_game_state.hero_index,
                     bench.pov_game_state.opponent_index,
                 )

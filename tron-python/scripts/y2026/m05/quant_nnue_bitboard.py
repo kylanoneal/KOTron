@@ -1,3 +1,6 @@
+from typing import Callable
+from dataclasses import dataclass
+
 import torch
 import shutil
 import random
@@ -7,7 +10,6 @@ import warnings
 from tqdm import tqdm
 from pathlib import Path
 from functools import partial
-from dataclasses import dataclass
 from torch.utils.tensorboard import SummaryWriter
 
 
@@ -18,15 +20,8 @@ from tron.game import (
     GameStatus,
     StatusInfo,
     Direction,
-    # from_2d_game_state,
-    # from_bitboard,
     next,
 )
-
-# from tron.game_2d import GameState2D
-
-
-from tron.ai.minimax import basic_minimax, MinimaxContext
 
 from tron.ai.tron_model import TronModel, RandomTronModel
 from tron.ai.nnue import NnueTronModel, QuantizedNnueTronModel
@@ -39,79 +34,78 @@ from tron.ai.training import (
     make_dataloader,
     get_sos_info,
 )
+
+from tron.ai.algos import choose_direction_basic_minimax
+
 from tron.ai.benchmarks import (
     BENCHMARKS_5X5,
     TIE_BENCHMARKS_5X5,
     WIN_LOSS_BENCHMARKS_5X5,
-    run_benchmark,
-    run_model_benchmark,
     match,
+    run_tactical_benchmark,
+    run_value_benchmark,
 )
+
+from tron.utils.sim_utils import get_start_position
 
 
 @dataclass
-class BenchmarkContext:
-    dir_fn: callable
+class ValueBenchmarkContext:
+    model: TronModel
+    description: str
+
+
+@dataclass
+class TacticalBenchmarkContext:
+    dir_fn: Callable[[PovGameState], Direction]
     description: str
 
 
 @dataclass
 class MatchContext:
-    p1_bc: BenchmarkContext
-    p2_bc: BenchmarkContext
+    p1_bc: TacticalBenchmarkContext
+    p2_bc: TacticalBenchmarkContext
     starting_positions: list[GameState]
 
 
-def get_start_position(
-    n_rows: int,
-    n_cols: int,
-    p_neutral: float,
-    p_obstacles: float,
-    obstacle_density_range: tuple,
-) -> GameState:
+def benchmark(
+    i,
+    tb_writer,
+    value_contexts: list[ValueBenchmarkContext],
+    tactical_contexts: list[TacticalBenchmarkContext],
+    match_contexts: list[MatchContext],
+):
 
-    is_neutral_start = p_neutral > random.random()
-    are_obstacles = p_obstacles > random.random()
+    for vc in value_contexts:
+        # Model value benchmarks
+        tie_benchmark_avg_score = sum(
+            [run_value_benchmark(b, vc.model) for b in TIE_BENCHMARKS_5X5]
+        ) / len(TIE_BENCHMARKS_5X5)
+        wl_benchmark_avg_score = sum(
+            [run_value_benchmark(b, vc.model) for b in WIN_LOSS_BENCHMARKS_5X5]
+        ) / len(WIN_LOSS_BENCHMARKS_5X5)
 
-    min_d, max_d = obstacle_density_range
-    obstacle_density = random.uniform(min_d, max_d) if are_obstacles else 0.0
+        tb_writer.add_scalar(
+            f"Avg. Value Diff (Ties) ({vc.description})", tie_benchmark_avg_score, i
+        )
+        tb_writer.add_scalar(
+            f"Avg. Value Diff (W/Ls) ({vc.description})", wl_benchmark_avg_score, i
+        )
 
-    return GameState.new_game(
-        num_players=2,
-        num_rows=n_rows,
-        num_cols=n_cols,
-        random_starts=True,
-        neutral_starts=is_neutral_start,
-        obstacle_density=obstacle_density,
-    )
-
-
-def benchmark(i, tb_writer, model, bench_contexts, match_contexts):
-
-    # Model value benchmarks
-    tie_benchmark_avg_score = sum(
-        [run_model_benchmark(b, model) for b in TIE_BENCHMARKS_5X5]
-    ) / len(TIE_BENCHMARKS_5X5)
-    wl_benchmark_avg_score = sum(
-        [run_model_benchmark(b, model) for b in WIN_LOSS_BENCHMARKS_5X5]
-    ) / len(WIN_LOSS_BENCHMARKS_5X5)
-
-    tb_writer.add_scalar("Avg. Model Diff (Ties)", tie_benchmark_avg_score, i)
-    tb_writer.add_scalar("Avg. Model Diff (W/Ls)", wl_benchmark_avg_score, i)
-
-    for bc in bench_contexts:
+    for tc in tactical_contexts:
         # Tactical benchmarks
         avg_benchmark_score = sum(
-            [run_benchmark(b, bc.dir_fn) for b in BENCHMARKS_5X5]
+            [run_tactical_benchmark(b, tc.dir_fn) for b in BENCHMARKS_5X5]
         ) / len(BENCHMARKS_5X5)
 
         tb_writer.add_scalar(
-            f"Avg. Benchmark Score ({bc.description})", avg_benchmark_score, i
+            f"Avg. Tactics Score ({tc.description})", avg_benchmark_score, i
         )
 
     # Match score
 
     for mc in match_contexts:
+
         p1_wins, p2_wins, ties = match(
             mc.p1_bc.dir_fn, mc.p2_bc.dir_fn, mc.starting_positions
         )
@@ -138,9 +132,10 @@ def main():
     # args = parser.parse_args()
 
     BATCH_SIZE = 4
-    PRE_TRAIN_KEEP_RATE =  0.1 #0.0025
+    PRE_TRAIN_EPOCHS = 50
+    PRE_TRAIN_KEEP_RATE = 0.1  # 0.0025
     KEEP_RATE = 0.5
-    LR = 0.01 # 0.001
+    LR = 0.01  # 0.001
 
     ACC_DIM = 64
 
@@ -148,7 +143,7 @@ def main():
     # TEMP = args.temp
     # EXPLR_FACTOR = args.explr_factor
 
-    MCTS_ITERS = 512
+    MCTS_ITERS = 16
     TEMP = 0.4  # 0.7
     EXPLR_FACTOR = 2.0
 
@@ -161,7 +156,7 @@ def main():
     # SIM_GAME_DEPTH = 2
     WIN_REWARD = 1.5
 
-    GAMES_PER_ITER = 256
+    GAMES_PER_ITER = 512
     CHECKPOINT_EVERY_N = 5
 
     P_NEUTRAL_START = 0.75
@@ -169,6 +164,8 @@ def main():
     OBSTACLE_DENSITY_RANGE = (0.0, 0.3)
 
     TRAIN_ITERS = 100_000
+
+    PRETRAIN_PLAY_MATCH_EVERY_N = 2
     PLAY_MATCH_EVERY_N = 20
     N_MATCH_START_POSITIONS = 100
 
@@ -225,29 +222,22 @@ def main():
     # BENCHMARKING SETUP
     ############################################
 
-    def _minimax_dir_fn(
-        pov_game_state: PovGameState, model: TronModel, depth: int
-    ) -> Direction:
+    with open(
+        tron_dir / "datasets" / "20260505_5x5_100starts.bin",
+        "rb",
+    ) as f:
+        bin_match_starts = f.read()
 
-        opponent_index = 0 if pov_game_state.hero_index == 1 else 1
-        mm_context = MinimaxContext(
-            model.run_inference,
-            pov_game_state.hero_index,
-            opponent_index,
-            win_magnitude=100_000.0,
-        )
+    # TODO: Just flattening this for now
+    match_starts_proto = tron.from_proto(bin_match_starts)
 
-        mm_result = basic_minimax(
-            pov_game_state.game_state,
-            depth=depth,
-            is_maximizing_player=True,
-            context=mm_context,
-        )
-        return (
-            mm_result.principal_variation
-            if mm_result.principal_variation is not None
-            else Direction.UP
-        )
+    match_starting_positions = []
+
+    for g in match_starts_proto:
+        assert len(g) == 1
+        assert g[0].num_cols == NUM_COLS and g[0].num_rows == NUM_ROWS
+
+        match_starting_positions.append(g[0])
 
     # TODO: Figure out a way to seed the random tron model so output is consistent run to run
     random_model = RandomTronModel()
@@ -257,15 +247,33 @@ def main():
     # fresh_state_dict = torch.load(tron_dir / "models" / "20250810_5x5_random_init.pth")
     # random_model.load_state_dict(fresh_state_dict, strict=True)
 
-    random_model_benchmark_contexts = [
-        random_model_d1_bc := BenchmarkContext(
-            partial(_minimax_dir_fn, model=random_model, depth=1),
+    random_bot_tactical_contexts = [
+        random_bot_d1_tbc := TacticalBenchmarkContext(
+            partial(choose_direction_basic_minimax, model=random_model, depth=1),
             description="Random Model D1 Minimax",
         ),
-        random_model_d3_bc := BenchmarkContext(
-            partial(_minimax_dir_fn, model=random_model, depth=3),
+        random_bot_d3_tbc := TacticalBenchmarkContext(
+            partial(choose_direction_basic_minimax, model=random_model, depth=3),
             description="Random Model D3 Minimax",
         ),
+    ]
+
+    model_tactical_contexts = [
+        model_d1_tbc := TacticalBenchmarkContext(
+            partial(choose_direction_basic_minimax, model=model, depth=1),
+            description="D1 Minimax",
+        ),
+        model_d3_tbc := TacticalBenchmarkContext(
+            partial(choose_direction_basic_minimax, model=model, depth=3),
+            description="D3 Minimax",
+        ),
+    ]
+
+    pretrain_match_contexts = [
+        MatchContext(model_d1_tbc, random_bot_d1_tbc, match_starting_positions),
+        # MatchContext(model_d1_bc, prev_model_d1_bc, match_starting_positions),
+        MatchContext(model_d3_tbc, random_bot_d3_tbc, match_starting_positions),
+        # MatchContext(model_d3_bc, prev_model_d3_bc, match_starting_positions),
     ]
 
     # prev_model = CnnTronModel(NUM_ROWS, NUM_COLS)
@@ -285,28 +293,6 @@ def main():
     #         description="Prev. Model D3 Minimax",
     #     ),
     # ]
-
-    # match_starting_positions = [
-    #     get_start_position(
-    #         NUM_ROWS, NUM_COLS, P_NEUTRAL_START, P_OBSTACLES, OBSTACLE_DENSITY_RANGE
-    #     )
-    #     for _ in range(N_MATCH_START_POSITIONS)
-    # ]
-
-    with open(
-        tron_dir / "datasets" / "20260505_5x5_100starts.bin",
-        "rb",
-    ) as f:
-        bin_match_starts = f.read()
-
-    # TODO: Just flattening this for now
-    match_starts_proto = tron.from_proto(bin_match_starts)
-
-    match_starting_positions = []
-
-    for g in match_starts_proto:
-        assert len(g) == 1
-        match_starting_positions.append(g[0])
 
     ############################################
     # PRE-TRAIN
@@ -332,21 +318,19 @@ def main():
         game = games[i]
         assert game[0].num_rows == NUM_ROWS and game[0].num_cols == NUM_COLS
 
-    for i in range(10):
+    for i in range(PRE_TRAIN_EPOCHS):
 
         pre_train_iters = i
 
-        
-        # TODO: Play matches and run tactics during pre-training
-        warnings.warn("Should be running benchmarks during pre-training.")
-        
-        # benchmark(
-        #     i,
-        #     tb_writer,
-        #     model,
-        #     model_benchmark_contexts,
-        #     match_contexts if i % PLAY_MATCH_EVERY_N == 0 else [],
-        # )
+        benchmark(
+            i,
+            tb_writer,
+            value_contexts=[
+                ValueBenchmarkContext(model, "non-quant model"),
+            ],
+            tactical_contexts=model_tactical_contexts,
+            match_contexts=pretrain_match_contexts if i % PRETRAIN_PLAY_MATCH_EVERY_N == 0 else [],
+        )
 
         # # Save the serialized data to a file.
         # with open(data_file, "rb") as f:
@@ -354,7 +338,9 @@ def main():
 
         # game_data = from_proto(bin_data)
 
-        dataloader = make_dataloader(games, batch_size=BATCH_SIZE, keep_rate=PRE_TRAIN_KEEP_RATE)
+        dataloader = make_dataloader(
+            games, batch_size=BATCH_SIZE, keep_rate=PRE_TRAIN_KEEP_RATE
+        )
 
         avg_loss, avg_pred_magnitude = train_loop(
             model, dataloader, optimizer, criterion, epochs=1
@@ -485,40 +471,40 @@ def main():
             i,
         )
 
-
-        model_benchmark_contexts = [
-            model_d1_bc := BenchmarkContext(
-                partial(_minimax_dir_fn, model=quant_model, depth=1),
-                description="D1 Minimax",
+        quant_model_tactical_contexts = [
+            quant_model_d1_tbc := TacticalBenchmarkContext(
+                partial(choose_direction_basic_minimax, model=quant_model, depth=1),
+                description="D1 Minimax (Quantized)",
             ),
-            model_d3_bc := BenchmarkContext(
-                partial(_minimax_dir_fn, model=quant_model, depth=3),
-                description="D3 Minimax",
+            quant_model_d3_tbc := TacticalBenchmarkContext(
+                partial(choose_direction_basic_minimax, model=quant_model, depth=3),
+                description="D3 Minimax (Quantized)",
             ),
         ]
 
+        match_contexts = [
+            MatchContext(model_d1_tbc, random_bot_d1_tbc, match_starting_positions),
+            MatchContext(model_d3_tbc, random_bot_d3_tbc, match_starting_positions),
+            MatchContext(
+                quant_model_d1_tbc, random_bot_d1_tbc, match_starting_positions
+            ),
+            MatchContext(
+                quant_model_d3_tbc, random_bot_d3_tbc, match_starting_positions
+            ),
+            # MatchContext(model_d1_bc, prev_model_d1_bc, match_starting_positions),
+            # MatchContext(model_d3_bc, prev_model_d3_bc, match_starting_positions),
+        ]
 
-        if i % PLAY_MATCH_EVERY_N == 0:
-
-            match_contexts = [
-                MatchContext(model_d1_bc, random_model_d1_bc, match_starting_positions),
-                # MatchContext(model_d1_bc, prev_model_d1_bc, match_starting_positions),
-                MatchContext(model_d3_bc, random_model_d3_bc, match_starting_positions),
-                # MatchContext(model_d3_bc, prev_model_d3_bc, match_starting_positions),
-            ]
-
-            benchmark(
-                i, tb_writer, quant_model, model_benchmark_contexts, match_contexts
-            )
-
-        else:
-            benchmark(
-                i,
-                tb_writer,
-                quant_model,
-                model_benchmark_contexts,
-                [],  # No match
-            )
+        benchmark(
+            i,
+            tb_writer,
+            value_contexts=[
+                ValueBenchmarkContext(model, "non-quant model"),
+                ValueBenchmarkContext(quant_model, "quant model"),
+            ],
+            tactical_contexts=model_tactical_contexts + quant_model_tactical_contexts,
+            match_contexts=match_contexts if i % PLAY_MATCH_EVERY_N == 0 else [],
+        )
 
         dataloader = make_dataloader(games, batch_size=BATCH_SIZE, keep_rate=KEEP_RATE)
 

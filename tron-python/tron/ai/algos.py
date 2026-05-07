@@ -4,10 +4,37 @@ import numpy as np
 from abc import ABC, abstractmethod
 
 import tron
-from tron import Direction, GameState
+from tron import Direction, GameState, PovGameState
 
 from tron.ai.tron_model import TronModel
-#from tron.ai.minimax import minimax_alpha_beta_eval_all, basic_minimax, minimax_dumb
+from tron.ai.minimax import basic_minimax, MinimaxContext
+
+
+
+def choose_direction_basic_minimax(
+    pov_game_state: PovGameState, model: TronModel, depth: int
+) -> Direction:
+
+    mm_context = MinimaxContext(
+        model.run_inference,
+        pov_game_state.hero_index,
+        pov_game_state.opponent_index,
+        win_magnitude=100_000.0,
+    )
+
+    mm_result = basic_minimax(
+        pov_game_state.game_state,
+        depth=depth,
+        is_maximizing_player=True,
+        context=mm_context,
+    )
+    return (
+        mm_result.principal_variation
+        if mm_result.principal_variation is not None
+        else Direction.UP
+    )
+
+
 
 def choose_direction_random(game: GameState, player_index: int) -> Direction:
 

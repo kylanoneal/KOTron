@@ -24,17 +24,19 @@ class NnueTronModel(TronModel):
         # Call super and return the IncompatibleKeys namedtuple
         rv = super().load_state_dict(state_dict, strict=strict)
 
-
         return rv
 
-    def init_accumulator(self, active_indices: list[int]):
+    def initialize_acc(self, pov_game_state: PovGameState):
         """
         Build accumulator from scratch by summing embeddings
-        active_indices: list or 1D tensor of feature indices that are “on”
+
         """
-        active_indices = torch.tensor(active_indices, dtype=torch.long)
-        emb = self.embedding(active_indices)  # [#active × acc_dim]
-        return emb.sum(dim=0)  # → [acc_dim]
+        active_indices = torch.tensor(
+            self.get_active_indices(pov_game_state), dtype=torch.long
+        )
+        acc = self.embedding(active_indices).sum(dim=0)
+
+        return acc
 
     def update_acc(self, acc, to_remove, to_add):
         """
@@ -75,15 +77,17 @@ class NnueTronModel(TronModel):
 
         game_state = pov_game_state.game_state
 
-        hero_emb_index = self.emb_idx_hero_head(game_state.players[pov_game_state.hero_index].idx)
+        hero_emb_index = self.emb_idx_hero_head(
+            game_state.players[pov_game_state.hero_index].idx
+        )
 
         opponent_emb_index = self.emb_idx_opponent_head(
             game_state.players[pov_game_state.opponent_index].idx
         )
 
-        indices = [hero_emb_index, opponent_emb_index] + get_wall_indices(pov_game_state.game_state)
-
-
+        indices = [hero_emb_index, opponent_emb_index] + get_wall_indices(
+            pov_game_state.game_state
+        )
 
         return indices
 
@@ -93,15 +97,17 @@ class NnueTronModel(TronModel):
 
         for pov_game_state in pov_game_states:
 
-            active_indices = self.get_active_indices(pov_game_state)
-
-            accs.append(self.init_accumulator(active_indices))
+            accs.append(self.initialize_acc(pov_game_state))
 
         return torch.stack(accs)
-    
+
     def run_inference(self, pov_game_state: PovGameState) -> float:
 
-        raise NotImplementedError("Should be using quantized version.")
+        acc = self.initialize_acc(pov_game_state)
+
+        output = self(acc)
+
+        return output.detach().item()
 
 
 class QuantizedNnueTronModel(TronModel):
@@ -141,7 +147,7 @@ class QuantizedNnueTronModel(TronModel):
 
         return y.item()
 
-    def initilize_acc(self, pov_game_state):
+    def initialize_acc(self, pov_game_state):
 
         indices = self.raw_model.get_active_indices(pov_game_state)
         # 1. Sum embeddings (int accumulator)
@@ -151,7 +157,7 @@ class QuantizedNnueTronModel(TronModel):
 
     def run_inference(self, pov_game_state: PovGameState) -> float:
 
-        acc = self.initilize_acc(pov_game_state)
+        acc = self.initialize_acc(pov_game_state)
 
         return self.run_inference_acc(acc)
 
@@ -166,7 +172,6 @@ class QuantizedNnueTronModel(TronModel):
         opponent_index = next_pov_game_state.opponent_index
 
         next_game_state = next_pov_game_state.game_state
-
 
         prev_hero = prev_game_state.players[hero_index]
         prev_oppo = prev_game_state.players[opponent_index]
