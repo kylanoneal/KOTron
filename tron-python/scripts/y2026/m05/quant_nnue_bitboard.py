@@ -132,18 +132,18 @@ def main():
     # args = parser.parse_args()
 
     BATCH_SIZE = 4
-    PRE_TRAIN_EPOCHS = 1 # 50
+    PRE_TRAIN_EPOCHS = 0 # 50
     PRE_TRAIN_KEEP_RATE = 0.0025#0.1  
     KEEP_RATE = 0.5
     LR = 0.002 #0.01  # 0.001
 
-    ACC_DIM = 64
+    ACC_DIM = 128
 
     # MCTS_ITERS = args.mcts_iters
     # TEMP = args.temp
     # EXPLR_FACTOR = args.explr_factor
 
-    MCTS_ITERS = 16
+    MCTS_ITERS = 64
     TEMP = 0.4  # 0.7
     EXPLR_FACTOR = 2.0
 
@@ -298,70 +298,68 @@ def main():
     # PRE-TRAIN
     ############################################
 
-    pre_train_iters = -1
+    if PRE_TRAIN_EPOCHS > 0:
 
-    datasets_dir = Path(tron.__file__).resolve().parent.parent / "datasets"
+        datasets_dir = Path(tron.__file__).resolve().parent.parent / "datasets"
 
-    data_dir = datasets_dir / "20260505_5x5_random_depth2"
+        data_dir = datasets_dir / "20260505_5x5_random_depth2"
 
-    games = []
+        games = []
 
-    for i, data_file in tqdm(enumerate(data_dir.iterdir())):
+        for i, data_file in tqdm(enumerate(data_dir.iterdir())):
 
-        # Save the serialized data to a file.
-        with open(data_file, "rb") as f:
-            bin_data = f.read()
+            # Save the serialized data to a file.
+            with open(data_file, "rb") as f:
+                bin_data = f.read()
 
-        games.extend(tron.from_proto(bin_data))
+            games.extend(tron.from_proto(bin_data))
 
-    for i in range(0, len(games), len(games) // 100):
-        game = games[i]
-        assert game[0].num_rows == NUM_ROWS and game[0].num_cols == NUM_COLS
+        for i in range(0, len(games), len(games) // 100):
+            game = games[i]
+            assert game[0].num_rows == NUM_ROWS and game[0].num_cols == NUM_COLS
 
-    for i in range(PRE_TRAIN_EPOCHS):
+        for i in range(PRE_TRAIN_EPOCHS):
 
-        pre_train_iters = i
+            benchmark(
+                i,
+                tb_writer,
+                value_contexts=[
+                    ValueBenchmarkContext(model, "non-quant model"),
+                ],
+                tactical_contexts=model_tactical_contexts,
+                match_contexts=pretrain_match_contexts if i % PRETRAIN_PLAY_MATCH_EVERY_N == 0 else [],
+            )
 
-        benchmark(
-            i,
-            tb_writer,
-            value_contexts=[
-                ValueBenchmarkContext(model, "non-quant model"),
-            ],
-            tactical_contexts=model_tactical_contexts,
-            match_contexts=pretrain_match_contexts if i % PRETRAIN_PLAY_MATCH_EVERY_N == 0 else [],
-        )
+            # # Save the serialized data to a file.
+            # with open(data_file, "rb") as f:
+            #     bin_data = f.read()
 
-        # # Save the serialized data to a file.
-        # with open(data_file, "rb") as f:
-        #     bin_data = f.read()
+            # game_data = from_proto(bin_data)
 
-        # game_data = from_proto(bin_data)
+            dataloader = make_dataloader(
+                games, batch_size=BATCH_SIZE, keep_rate=PRE_TRAIN_KEEP_RATE
+            )
 
-        dataloader = make_dataloader(
-            games, batch_size=BATCH_SIZE, keep_rate=PRE_TRAIN_KEEP_RATE
-        )
+            avg_loss, avg_pred_magnitude = train_loop(
+                model, dataloader, optimizer, criterion, epochs=1
+            )
 
-        avg_loss, avg_pred_magnitude = train_loop(
-            model, dataloader, optimizer, criterion, epochs=1
-        )
+            sos_dict, total_sos = get_sos_info(model)
 
-        sos_dict, total_sos = get_sos_info(model)
+            print(f"{avg_loss=:.3f}, {avg_pred_magnitude=:.3f}, {total_sos=}")
 
-        print(f"{avg_loss=:.3f}, {avg_pred_magnitude=:.3f}, {total_sos=}")
+            # print("\nSum of squares (weights/biases):")
+            # for param, sos_val in sos_dict.items():
+            #     print(f"{param:40s} {sos_val}")
 
-        # print("\nSum of squares (weights/biases):")
-        # for param, sos_val in sos_dict.items():
-        #     print(f"{param:40s} {sos_val}")
+            tb_writer.add_scalar("Weights Sum of Squares", total_sos, i)
+            tb_writer.add_scalar("Average Loss", avg_loss, i)
+            tb_writer.add_scalar("Average Prediction Magnitude", avg_pred_magnitude, i)
 
-        tb_writer.add_scalar("Weights Sum of Squares", total_sos, i)
-        tb_writer.add_scalar("Average Loss", avg_loss, i)
-        tb_writer.add_scalar("Average Prediction Magnitude", avg_pred_magnitude, i)
-
-        torch.save(
-            model.state_dict(),
-            checkpoints_dir / f"pretrain_{RUN_UID}_{i}.pth",
-        )
+            torch.save(
+                model.state_dict(),
+                checkpoints_dir / f"pretrain_{RUN_UID}_{i}.pth",
+            )
 
     ############################################
     # SIM/TRAIN/BENCHMARK LOOP
@@ -369,7 +367,7 @@ def main():
 
     total_p1_wins = total_p2_wins = total_ties = 0
 
-    for i in range(pre_train_iters + 1, TRAIN_ITERS):
+    for i in range(PRE_TRAIN_EPOCHS, TRAIN_ITERS):
 
         quant_model = QuantizedNnueTronModel(model, scale=QUANT_SCALE)
 
