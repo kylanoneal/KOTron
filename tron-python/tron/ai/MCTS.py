@@ -48,8 +48,10 @@ class Node:
             ), "Hero states (only hero has chosen direction) should not have accumulator"
             assert parent is not None
         else:
-            if context.use_acc:
-                assert acc is not None
+            if context.use_acc and acc is None:
+                assert (
+                    get_status(game_state).status != GameStatus.IN_PROGRESS
+                ), "Accumulator should not be None for non-terminal state"
 
         self.context = context
         self.game_state = game_state
@@ -93,7 +95,7 @@ class Node:
 
                 next_game_state = next(self.game_state, next_dirs)
 
-                next_status = get_status(self.game_state)
+                next_status = get_status(next_game_state)
 
                 if next_status.status == GameStatus.IN_PROGRESS:
 
@@ -120,20 +122,25 @@ class Node:
                         eval = -self.context.model.run_inference(
                             pov_game_state=pov_next_game_state
                         )
-
-                elif next_status.status == GameStatus.WINNER:
-
-                    # NOTE: This eval is opponent perspective
-                    eval = (
-                        self.context.win_magnitude
-                        if next_status.winner_index == self.context.opponent_index
-                        else self.context.win_magnitude * -1
-                    )
-
-                elif next_status.status == GameStatus.TIE:
-                    eval = 0.0
                 else:
-                    raise ValueError()
+
+                    # Terminal state reached
+
+                    updated_acc = None
+
+                    if next_status.status == GameStatus.WINNER:
+
+                        # NOTE: This eval is opponent perspective
+                        eval = (
+                            self.context.win_magnitude
+                            if next_status.winner_index == self.context.opponent_index
+                            else self.context.win_magnitude * -1
+                        )
+
+                    elif next_status.status == GameStatus.TIE:
+                        eval = 0.0
+                    else:
+                        raise ValueError()
 
                 child_node = Node(
                     self.context,

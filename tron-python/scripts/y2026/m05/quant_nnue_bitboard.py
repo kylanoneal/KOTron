@@ -132,10 +132,10 @@ def main():
     # args = parser.parse_args()
 
     BATCH_SIZE = 4
-    PRE_TRAIN_EPOCHS = 50
-    PRE_TRAIN_KEEP_RATE = 0.1  # 0.0025
+    PRE_TRAIN_EPOCHS = 1 # 50
+    PRE_TRAIN_KEEP_RATE = 0.0025#0.1  
     KEEP_RATE = 0.5
-    LR = 0.01  # 0.001
+    LR = 0.002 #0.01  # 0.001
 
     ACC_DIM = 64
 
@@ -394,8 +394,8 @@ def main():
 
             current_game: list[GameState] = [game_state]
 
-            p1_initial_acc = quant_model.initilize_acc(PovGameState(game_state, 0, 1))
-            p2_initial_acc = quant_model.initilize_acc(PovGameState(game_state, 1, 0))
+            p1_initial_acc = quant_model.initialize_acc(PovGameState(game_state, 0, 1))
+            p2_initial_acc = quant_model.initialize_acc(PovGameState(game_state, 1, 0))
 
             next_p1_root = next_p2_root = None
             while game_status.status == GameStatus.IN_PROGRESS:

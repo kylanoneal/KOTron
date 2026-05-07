@@ -16,7 +16,7 @@ def choose_direction_basic_minimax(
 ) -> Direction:
 
     mm_context = MinimaxContext(
-        model.run_inference,
+        model,
         pov_game_state.hero_index,
         pov_game_state.opponent_index,
         win_magnitude=100_000.0,
@@ -25,7 +25,7 @@ def choose_direction_basic_minimax(
     mm_result = basic_minimax(
         pov_game_state.game_state,
         depth=depth,
-        is_maximizing_player=True,
+        is_hero=True,
         context=mm_context,
     )
     return (

@@ -19,13 +19,6 @@ class NnueTronModel(TronModel):
         self.num_cols = num_cols
         self.num_cells = num_rows * num_cols
 
-    def load_state_dict(self, state_dict, strict: bool = True):
-
-        # Call super and return the IncompatibleKeys namedtuple
-        rv = super().load_state_dict(state_dict, strict=strict)
-
-        return rv
-
     def initialize_acc(self, pov_game_state: PovGameState):
         """
         Build accumulator from scratch by summing embeddings
@@ -103,13 +96,13 @@ class NnueTronModel(TronModel):
 
     def run_inference(self, pov_game_state: PovGameState) -> float:
 
-        acc = self.initialize_acc(pov_game_state)
+        with torch.no_grad():
+            acc = self.initialize_acc(pov_game_state)
+            output = self(acc)
+            return output.item()
 
-        output = self(acc)
 
-        return output.detach().item()
-
-
+# TODO: Figure out most efficient dtypes to use
 class QuantizedNnueTronModel(TronModel):
 
     def __init__(self, model: NnueTronModel, scale=256):
@@ -121,24 +114,25 @@ class QuantizedNnueTronModel(TronModel):
 
         self.scale = scale
 
-        self.embed_weights = torch.round(model.embedding.weight * scale).to(torch.int32)
+        self.embed_weights = torch.round(model.embedding.weight * scale).to(dtype=torch.int64)
 
-        self.linear_weights = torch.round(model.fc1.weight * scale).to(torch.int32)
-        self.linear_bias = torch.round(model.fc1.bias * scale * scale).to(torch.int32)
+        self.linear_weights = torch.round(model.fc1.weight * scale).to(dtype=torch.int64)
+        self.linear_bias = torch.round(model.fc1.bias * scale * scale).to(dtype=torch.int64)
+
+        assert self.embed_weights.dtype == torch.int64
+        assert self.linear_weights.dtype == torch.int64
+        assert self.linear_bias.dtype == torch.int64
 
     def run_inference_acc(self, acc) -> float:
 
+        assert acc.dtype == torch.int64
         # 2. Clamp to [0, scale]
         acc = torch.clamp(acc, 0, self.scale)
         # print(f"After clamp: {acc.sum().item()/ 1024=}")
 
-        acc = acc.to(dtype=torch.int32)
-
-        # print(f"After int32 cast: {acc.sum().item()/ 1024=}")
-
         # 3. Linear layer in integer domain
         #    (1 x acc_dim) @ (acc_dim) -> scalar
-        y_int = (self.linear_weights @ acc) + self.linear_bias  # still int32
+        y_int = (self.linear_weights @ acc) + self.linear_bias 
 
         # print(f"After linear: {y_int.sum().item()/ 1024 / 1024=}")
 
@@ -151,7 +145,10 @@ class QuantizedNnueTronModel(TronModel):
 
         indices = self.raw_model.get_active_indices(pov_game_state)
         # 1. Sum embeddings (int accumulator)
-        acc = self.embed_weights[indices].sum(dim=0)  # [acc_dim], int32
+        acc = self.embed_weights[indices].sum(dim=0)  # [acc_dim], int64
+
+
+        assert acc.dtype == torch.int64
 
         return acc
 
@@ -168,6 +165,8 @@ class QuantizedNnueTronModel(TronModel):
         next_pov_game_state: PovGameState,
     ):
 
+        assert prev_acc.dtype == torch.int64
+
         hero_index = next_pov_game_state.hero_index
         opponent_index = next_pov_game_state.opponent_index
 
@@ -178,6 +177,12 @@ class QuantizedNnueTronModel(TronModel):
 
         new_hero = next_game_state.players[hero_index]
         new_oppo = next_game_state.players[opponent_index]
+
+
+        # NOTE: will double count a wall if the player is inactive
+        assert len(next_pov_game_state.game_state.players) == 2
+        assert new_hero.can_move
+        assert new_oppo.can_move
 
         subtract_indices = [
             self.raw_model.emb_idx_hero_head(prev_hero.idx),

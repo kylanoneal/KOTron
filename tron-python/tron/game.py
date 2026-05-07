@@ -138,6 +138,14 @@ class PovGameState:
     hero_index: int
     opponent_index: int
 
+    
+    def __post_init__(self):
+
+        assert (0 <= self.hero_index < 2) and (0 <= self.opponent_index < 2)
+
+        assert self.hero_index != self.opponent_index
+
+
 
 @dataclass(frozen=True)
 class StatusInfo:

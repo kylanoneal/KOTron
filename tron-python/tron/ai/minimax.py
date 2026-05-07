@@ -1,7 +1,4 @@
-import numpy as np
-import sys
 from typing import Optional
-from cachetools import LRUCache, cached
 from dataclasses import dataclass
 
 import tron
@@ -10,11 +7,11 @@ from tron.game import GameState, StatusInfo, GameStatus, Direction
 from tron.ai.tron_model import TronModel, PovGameState
 
 
-
 @dataclass
 class MinimaxResult:
     evaluation: float
     principal_variation: Optional[Direction] = None
+
 
 @dataclass
 class MinimaxArgs:
@@ -23,23 +20,34 @@ class MinimaxArgs:
     is_hero: bool
     hero_move: Direction
 
+
 @dataclass
 class MinimaxContext:
     model: TronModel
     hero_index: int
     opponent_index: int
-    win_magnitude: float
+    win_magnitude: float = 10_000.0
     debug_stack: Optional[list[MinimaxArgs]] = None
+
+    def __post_init__(self):
+
+        assert (0 <= self.hero_index < 2) and (0 <= self.opponent_index < 2)
+
+        assert self.hero_index != self.opponent_index
+
+        assert self.win_magnitude > 1.0
 
 
 def basic_minimax(
     game_state: GameState,
-    depth,
+    depth: int,
     is_hero: bool,
-    hero_move: Direction = None,
+    hero_move: Optional[Direction] = None,
     context: MinimaxContext = None,
 ) -> MinimaxResult:
 
+    assert depth >= 0
+    assert context is not None, "Context must be passed"
 
     if context.debug_stack is not None:
 
@@ -51,9 +59,6 @@ def basic_minimax(
                 hero_move,
             )
         )
-
-
-    assert context is not None, "Context must be passed"
 
     if is_hero:
         assert hero_move is None
@@ -83,15 +88,21 @@ def basic_minimax(
 
     if depth == 0:
         assert is_hero
+
+        model_eval = context.model.run_inference(
+            PovGameState(game_state, hero_index, opponent_index)
+        )
+
+        assert abs(model_eval) < context.win_magnitude
+
         return MinimaxResult(
-            context.model.run_inference(PovGameState(game_state, hero_index, opponent_index)), None
+            model_eval,
+            None,
         )
 
     if is_hero:
 
-        possible_directions = tron.get_possible_directions(
-            game_state, hero_index
-        )
+        possible_directions = tron.get_possible_directions(game_state, hero_index)
 
         possible_directions = (
             possible_directions if len(possible_directions) > 0 else [Direction.UP]
@@ -114,9 +125,7 @@ def basic_minimax(
         return MinimaxResult(max_eval, best_dir)
     else:
 
-        possible_directions = tron.get_possible_directions(
-            game_state, opponent_index
-        )
+        possible_directions = tron.get_possible_directions(game_state, opponent_index)
         possible_directions = (
             possible_directions if len(possible_directions) > 0 else [Direction.UP]
         )
