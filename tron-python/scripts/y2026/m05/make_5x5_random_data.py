@@ -46,15 +46,19 @@ def main():
     P_OBSTACLES = 0.5
     OBSTACLE_DENSITY_RANGE = (0.0, 0.3)
 
+    DEPTH = 3
+
+
+    N_GAMES = 10_000
 
     model = RandomTronModel()
 
-    for i in tqdm(range(200)):
+    for i in tqdm(range(100)):
 
 
         games = []
 
-        for j in range(1024):
+        for j in tqdm(range(N_GAMES)):
 
 
             game = get_start_position(
@@ -70,16 +74,16 @@ def main():
 
                 p1_mm_result: MinimaxResult = basic_minimax(
                     game,
-                    depth=2,
-                    is_maximizing_player=True,
-                    context=MinimaxContext(model.run_inference, maximizing_player=0, minimizing_player=1, win_magnitude=10)
+                    depth=DEPTH,
+                    is_hero=True,
+                    context=MinimaxContext(model, hero_index=0, opponent_index=1, win_magnitude=10)
                 )
 
                 p2_mm_result: MinimaxResult = basic_minimax(
                     game,
-                    depth=2,
-                    is_maximizing_player=True,
-                    context=MinimaxContext(model.run_inference, maximizing_player=1, minimizing_player=0, win_magnitude=10)
+                    depth=DEPTH,
+                    is_hero=True,
+                    context=MinimaxContext(model, hero_index=1, opponent_index=0, win_magnitude=10)
                 )
 
                 p1_dir = Direction.UP if p1_mm_result.principal_variation is None else p1_mm_result.principal_variation
@@ -97,7 +101,7 @@ def main():
             games.append(curr_game)
 
 
-        assert len(games) == 1024
+        assert len(games) == N_GAMES
 
         for full_game in games:
 
@@ -118,7 +122,7 @@ def main():
 
         # Save the serialized data to a file.
         with open(
-            datasets_dir / "20260505_5x5_random_depth2" / f"{i:04d}_ngames1024", "wb"
+            datasets_dir / f"20260507_5x5_random_depth{DEPTH}" / f"{i:04d}_ngames{N_GAMES}.bin", "wb"
         ) as f:
             f.write(serialized_data)
 

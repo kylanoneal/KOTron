@@ -132,10 +132,10 @@ def main():
     # args = parser.parse_args()
 
     BATCH_SIZE = 4
-    PRE_TRAIN_EPOCHS = 0 # 50
-    PRE_TRAIN_KEEP_RATE = 0.0025#0.1  
+    PRE_TRAIN_EPOCHS = 10_000
+    PRE_TRAIN_KEEP_RATE = 0.01
     KEEP_RATE = 0.5
-    LR = 0.002 #0.01  # 0.001
+    LR = 0.001 #0.01  # 0.001
 
     ACC_DIM = 128
 
@@ -149,7 +149,7 @@ def main():
 
     QUANT_SCALE = 256
 
-    RUN_DESCRIPTION = "quant_nnue_5x5"
+    RUN_DESCRIPTION = "pretrain_only_quant_nnue_5x5"
 
     NUM_ROWS = NUM_COLS = 5
 
@@ -303,7 +303,7 @@ def main():
 
         datasets_dir = Path(tron.__file__).resolve().parent.parent / "datasets"
 
-        data_dir = datasets_dir / "20260505_5x5_random_depth2"
+        data_dir = datasets_dir / "20260507_5x5_random_depth3"
 
         games = []
 
@@ -362,168 +362,6 @@ def main():
                 checkpoints_dir / f"pretrain_{RUN_UID}_{i}.pth",
             )
 
-    ############################################
-    # SIM/TRAIN/BENCHMARK LOOP
-    ############################################
-
-    total_p1_wins = total_p2_wins = total_ties = 0
-
-    for i in range(PRE_TRAIN_EPOCHS, TRAIN_ITERS):
-
-        quant_model = QuantizedNnueTronModel(model, scale=QUANT_SCALE)
-
-        p1_mcts_context = MctsContext(0, 1, WIN_REWARD, quant_model, use_acc=True)
-        p2_mcts_context = MctsContext(1, 0, WIN_REWARD, quant_model, use_acc=True)
-
-        games: list[list[GameState]] = []
-
-        p1_wins = p2_wins = ties = 0
-
-        for _ in tqdm(range(GAMES_PER_ITER)):
-
-            game_state: GameState = get_start_position(
-                NUM_ROWS,
-                NUM_COLS,
-                P_NEUTRAL_START,
-                P_OBSTACLES,
-                OBSTACLE_DENSITY_RANGE,
-            )
-
-            game_status: StatusInfo = tron.get_status(game_state)
-
-            current_game: list[GameState] = [game_state]
-
-            p1_initial_acc = quant_model.initialize_acc(PovGameState(game_state, 0, 1))
-            p2_initial_acc = quant_model.initialize_acc(PovGameState(game_state, 1, 0))
-
-            next_p1_root = next_p2_root = None
-            while game_status.status == GameStatus.IN_PROGRESS:
-
-                p1_dir, p1_root = MCTS.search(
-                    p1_mcts_context,
-                    game_state,
-                    n_iterations=MCTS_ITERS,
-                    temp=TEMP,
-                    exploration_factor=EXPLR_FACTOR,
-                    root=next_p1_root,
-                    initial_acc=p1_initial_acc if next_p1_root is None else None,
-                )
-
-                p2_dir, p2_root = MCTS.search(
-                    p2_mcts_context,
-                    game_state,
-                    n_iterations=MCTS_ITERS,
-                    temp=TEMP,
-                    exploration_factor=EXPLR_FACTOR,
-                    root=next_p2_root,
-                    initial_acc=p2_initial_acc if next_p2_root is None else None,
-                )
-
-                next_p1_root = MCTS.get_next_root(p1_root, p1_dir, p2_dir)
-                next_p2_root = MCTS.get_next_root(p2_root, p2_dir, p1_dir)
-
-                # show_game_state(game_state, step_through=True)
-
-                # p1_dir = choose_direction_random(game_state, 0)
-                # p2_dir = choose_direction_random(game_state, 1)
-
-                game_state = next(game_state, directions=(p1_dir, p2_dir))
-
-                current_game.append(game_state)
-
-                game_status = tron.get_status(game_state)
-
-            games.append(current_game)
-
-            if game_status.status == GameStatus.TIE:
-                # print(f"Tie")
-                ties += 1
-            elif game_status.winner_index == 0:
-                p1_wins += 1
-                # print("P1 Win")
-            elif game_status.winner_index == 1:
-                p2_wins += 1
-                # print("P2 win")
-
-        serialized_data = tron.to_proto(games)
-
-        # Save the serialized data to a file.
-        with open(
-            data_out_dir / f"gamedata_{i}_ngames_{GAMES_PER_ITER}.bin", "wb"
-        ) as f:
-            f.write(serialized_data)
-
-        print("\n" + "-" * 25 + "\n")
-        print(f"{i=}, {p1_wins=}, {p2_wins=}, {ties=}")
-
-        total_ties += ties
-        total_p1_wins += p1_wins
-        total_p2_wins += p2_wins
-
-        print(f"{total_p1_wins=}, {total_p2_wins=}, {total_ties=}")
-
-        tb_writer.add_scalar("P1 Wins / Total Wins", p1_wins / (p1_wins + p2_wins), i)
-        tb_writer.add_scalar("Tie Rate", ties / GAMES_PER_ITER, i)
-        tb_writer.add_scalar(
-            "Average Game Length",
-            sum([len(game) for game in games]) / GAMES_PER_ITER,
-            i,
-        )
-
-        quant_model_tactical_contexts = [
-            quant_model_d1_tbc := TacticalBenchmarkContext(
-                partial(choose_direction_basic_minimax, model=quant_model, depth=1),
-                description="D1 Minimax (Quantized)",
-            ),
-            quant_model_d3_tbc := TacticalBenchmarkContext(
-                partial(choose_direction_basic_minimax, model=quant_model, depth=3),
-                description="D3 Minimax (Quantized)",
-            ),
-        ]
-
-        match_contexts = [
-            MatchContext(model_d1_tbc, random_bot_d1_tbc, match_starting_positions),
-            MatchContext(model_d3_tbc, random_bot_d3_tbc, match_starting_positions),
-            MatchContext(
-                quant_model_d1_tbc, random_bot_d1_tbc, match_starting_positions
-            ),
-            MatchContext(
-                quant_model_d3_tbc, random_bot_d3_tbc, match_starting_positions
-            ),
-            # MatchContext(model_d1_bc, prev_model_d1_bc, match_starting_positions),
-            # MatchContext(model_d3_bc, prev_model_d3_bc, match_starting_positions),
-        ]
-
-        benchmark(
-            i,
-            tb_writer,
-            value_contexts=[
-                ValueBenchmarkContext(model, "non-quant model"),
-                ValueBenchmarkContext(quant_model, "quant model"),
-            ],
-            tactical_contexts=model_tactical_contexts + quant_model_tactical_contexts,
-            match_contexts=match_contexts if i % PLAY_MATCH_EVERY_N == 0 else [],
-        )
-
-        dataloader = make_dataloader(games, batch_size=BATCH_SIZE, keep_rate=KEEP_RATE)
-
-        avg_loss, avg_pred_magnitude = train_loop(
-            model, dataloader, optimizer, criterion, epochs=1
-        )
-
-        print(f"{avg_loss=:.3f}, {avg_pred_magnitude=:.3f}")
-
-        sos_dict, total_sos = get_sos_info(model)
-        print("\nSum of squares (weights/biases):")
-        for param, sos_val in sos_dict.items():
-            print(f"{param:40s} {sos_val}")
-
-        tb_writer.add_scalar("Weights Sum of Squares", total_sos, i)
-        tb_writer.add_scalar("Average Loss", avg_loss, i)
-        tb_writer.add_scalar("Average Prediction Magnitude", avg_pred_magnitude, i)
-
-        if i % CHECKPOINT_EVERY_N == 0:
-            torch.save(model.state_dict(), checkpoints_dir / f"{RUN_UID}_{i}.pth")
 
 
 if __name__ == "__main__":
