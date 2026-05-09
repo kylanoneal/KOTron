@@ -115,7 +115,7 @@ def benchmark(
             viz = render_tactic_benchmark_image(results)
 
             tb_writer.add_image(
-                f"tactics/spatial/{j}",
+                f"tactics/spatial/{tc.description}_{j}",
                 viz,
                 global_step=i,
                 dataformats="HWC",
@@ -147,7 +147,7 @@ def benchmark(
             viz = render_tactic_benchmark_image(results)
 
             tb_writer.add_image(
-                f"tactics/decisive/{j}",
+                f"tactics/decisive/{tc.description}_{j}",
                 viz,
                 global_step=i,
                 dataformats="HWC",
