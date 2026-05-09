@@ -29,14 +29,14 @@ class ValueBenchmark:
 
 
 @dataclass(frozen=True)
-class TacticalBenchmark:
+class Tactic:
 
     pov_game_state: PovGameState
     opposing_dirs: list[Direction]
     expected_hero_dirs: Optional[list[Direction]] = None
 
     @staticmethod
-    def transform(bench: "TacticalBenchmark", do_lr_flip: bool, n_rot_90: int) -> "TacticalBenchmark":
+    def transform(bench: "Tactic", do_lr_flip: bool, n_rot_90: int) -> "Tactic":
 
         game_2d: GameState2D = from_bitboard(bench.pov_game_state.game_state)
 
@@ -59,15 +59,22 @@ class TacticalBenchmark:
         else:
             t_expected_hero_dirs = None
 
-        return TacticalBenchmark(t_pov_game_state, t_opposing_dirs, t_expected_hero_dirs)
+        return Tactic(t_pov_game_state, t_opposing_dirs, t_expected_hero_dirs)
 
 
+@dataclass(frozen=True)
+class TacticResult:
+
+    tactic: Tactic
+    pov_game_states: list[PovGameState]
+    actual_hero_dirs: list[Direction]
+    correct_moves: int
 
 
 # TODO: Add "null" p1 moves - test bot's "will to live"
-# TODO: Run each benchmark 8 times? with the 8 possible symmetries
-BENCHMARKS_5X5 = [
-    TacticalBenchmark(
+
+SPATIAL_TACTICS_5X5 = (
+    Tactic(
         pov_game_state=PovGameState(
             game_state=from_2d_game_state(
                 GameState2D(
@@ -89,7 +96,7 @@ BENCHMARKS_5X5 = [
         ),
         opposing_dirs=([Direction.DOWN] * 4) + [Direction.LEFT] + ([Direction.UP] * 4),
     ),
-    TacticalBenchmark(
+    Tactic(
         pov_game_state=PovGameState(
             game_state=from_2d_game_state(
                 GameState2D(
@@ -113,7 +120,10 @@ BENCHMARKS_5X5 = [
         + [Direction.DOWN]
         + ([Direction.LEFT] * 4),
     ),
-    TacticalBenchmark(
+)
+
+DECISIVE_TACTICS_5X5 = (
+    Tactic(
         pov_game_state=PovGameState(
             game_state=from_2d_game_state(
                 GameState2D(
@@ -136,9 +146,9 @@ BENCHMARKS_5X5 = [
         opposing_dirs=[Direction.DOWN],
         expected_hero_dirs=[Direction.LEFT],
     ),
-]
+)
 
-TIE_BENCHMARKS_5X5 = [
+TIES_5X5 = (
     ValueBenchmark(
         pov_game_state=PovGameState(
             game_state=from_2d_game_state(
@@ -183,10 +193,10 @@ TIE_BENCHMARKS_5X5 = [
         ),
         expected_value=0.0,
     ),
-]
+)
 
 # TODO: Add perspective switches
-WIN_LOSS_BENCHMARKS_5X5 = [
+WINS_LOSSES_5X5 = (
     ValueBenchmark(
         pov_game_state=PovGameState(
             game_state=from_2d_game_state(
@@ -275,58 +285,69 @@ WIN_LOSS_BENCHMARKS_5X5 = [
         ),
         expected_value=-1.0,
     ),
-]
+)
 
 
-def run_tactical_benchmark(
-    bench: TacticalBenchmark, dir_fn: Callable[[PovGameState], Direction], run_symmetries: bool = True
-) -> float:
+def run_tactic(
+    tactic: Tactic,
+    dir_fn: Callable[[PovGameState], Direction],
+    run_symmetries: bool = True,
+) -> list[TacticResult]:
 
     if run_symmetries:
-        benchmarks = []
+        tactics = []
 
         for do_lr_flip, n_rot_90 in itertools.product([True, False], range(4)):
-            benchmarks.append(TacticalBenchmark.transform(bench, do_lr_flip, n_rot_90))
+            tactics.append(Tactic.transform(tactic, do_lr_flip, n_rot_90))
 
     else:
-        benchmarks = [bench]
+        tactics = [tactic]
 
     total_score = 0.0
 
-    for b in benchmarks:
+    results: list[TacticResult] = []
+
+    for t in tactics:
         pov_game_state, opposing_dirs, expected_hero_dirs = (
-            b.pov_game_state,
-            b.opposing_dirs,
-            b.expected_hero_dirs,
+            t.pov_game_state,
+            t.opposing_dirs,
+            t.expected_hero_dirs,
         )
 
-        is_tactic = expected_hero_dirs is not None
-
-        if is_tactic:
-            assert len(opposing_dirs) == len(expected_hero_dirs)
+        actual_pov_game_states = [pov_game_state]
+        actual_hero_dirs = []
 
         # Score is based on how far through the opposing dirs we got
+        # i will hold the number of correct moves made
         for i in range(len(opposing_dirs)):
 
             hero_dir = dir_fn(pov_game_state)
 
-            if is_tactic:
-
-                if hero_dir != expected_hero_dirs[i]:
-                    break
+            actual_hero_dirs.append(hero_dir)
 
             directions = [None, None]
             directions[pov_game_state.hero_index] = hero_dir
             directions[pov_game_state.opponent_index] = opposing_dirs[i]
 
             pov_game_state = PovGameState(
-                next(pov_game_state.game_state, directions), pov_game_state.hero_index, pov_game_state.opponent_index
+                next(pov_game_state.game_state, directions),
+                pov_game_state.hero_index,
+                pov_game_state.opponent_index,
             )
+
+            actual_pov_game_states.append(pov_game_state)
+
+            if expected_hero_dirs is not None:
+
+                if hero_dir != expected_hero_dirs[i]:
+                    break
 
             status_info = get_status(pov_game_state.game_state)
 
             if status_info.status != GameStatus.IN_PROGRESS:
-                assert not is_tactic
+                assert (
+                    expected_hero_dirs is None
+                ), "Tactics with expected hero dirs should not reach terminal state"
 
                 assert status_info.winner_index != pov_game_state.hero_index
                 assert status_info.status != GameStatus.TIE
@@ -334,10 +355,9 @@ def run_tactical_benchmark(
         else:
             i += 1
 
-        # print(f"Made it through {i} moves of {len(opposing_dirs)} move benchmark.")
-        total_score += i / len(opposing_dirs)
+        results.append(TacticResult(t, actual_pov_game_states, actual_hero_dirs, i))
 
-    return total_score / len(benchmarks)
+    return results
 
 
 def run_value_benchmark(bench: ValueBenchmark, model: TronModel, run_symmetries=True):
@@ -348,8 +368,9 @@ def run_value_benchmark(bench: ValueBenchmark, model: TronModel, run_symmetries=
         for do_lr_flip, n_rot_90 in itertools.product([True, False], range(4)):
             pov_game_states.append(
                 PovGameState(
-                    GameState.transform(bench.pov_game_state.game_state, do_lr_flip, n_rot_90)
-                    ,
+                    GameState.transform(
+                        bench.pov_game_state.game_state, do_lr_flip, n_rot_90
+                    ),
                     bench.pov_game_state.hero_index,
                     bench.pov_game_state.opponent_index,
                 )
@@ -380,10 +401,12 @@ def match(p1_dir_fn: callable, p2_dir_fn: callable, starting_positions=list[Game
 
         if len(white_pos.players) > 2:
             raise NotImplementedError()
-         
+
         black_players = (white_pos.players[1], white_pos.players[0])
 
-        black_pos = GameState(white_pos.num_rows, white_pos.num_cols, white_pos.board, black_players)
+        black_pos = GameState(
+            white_pos.num_rows, white_pos.num_cols, white_pos.board, black_players
+        )
 
         for start_game_state in [white_pos, black_pos]:
 
@@ -393,8 +416,12 @@ def match(p1_dir_fn: callable, p2_dir_fn: callable, starting_positions=list[Game
 
             while status_info.status == GameStatus.IN_PROGRESS:
 
-                p1_dir = p1_dir_fn(PovGameState(game_state, hero_index=0, opponent_index=1))
-                p2_dir = p2_dir_fn(PovGameState(game_state, hero_index=1, opponent_index=0))
+                p1_dir = p1_dir_fn(
+                    PovGameState(game_state, hero_index=0, opponent_index=1)
+                )
+                p2_dir = p2_dir_fn(
+                    PovGameState(game_state, hero_index=1, opponent_index=0)
+                )
 
                 game_state = next(game_state, directions=(p1_dir, p2_dir))
 
