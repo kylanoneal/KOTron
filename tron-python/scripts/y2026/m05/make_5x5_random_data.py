@@ -46,12 +46,20 @@ def main():
     P_OBSTACLES = 0.5
     OBSTACLE_DENSITY_RANGE = (0.0, 0.3)
 
-    DEPTH = 3
+    DEPTH = 15
 
 
-    N_GAMES = 10_000
+    N_GAMES = 100
 
     model = RandomTronModel()
+
+
+    tron_dir = Path(tron.__file__).resolve().parent.parent
+
+    datasets_dir = tron_dir / "datasets"
+
+    out_dir = datasets_dir / f"20260509_5x5_random_depth{DEPTH}"
+    out_dir.mkdir(exist_ok=False)
 
     for i in tqdm(range(100)):
 
@@ -116,13 +124,9 @@ def main():
         # Serialize game data
         serialized_data = tron.to_proto(games)
 
-        tron_dir = Path(tron.__file__).resolve().parent.parent
-
-        datasets_dir = tron_dir / "datasets"
-
         # Save the serialized data to a file.
         with open(
-            datasets_dir / f"20260507_5x5_random_depth{DEPTH}" / f"{i:04d}_ngames{N_GAMES}.bin", "wb"
+            out_dir / f"{i:04d}_ngames{N_GAMES}.bin", "wb"
         ) as f:
             f.write(serialized_data)
 
