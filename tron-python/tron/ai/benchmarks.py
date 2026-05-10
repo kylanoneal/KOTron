@@ -16,16 +16,20 @@ from tron.game import (
     from_bitboard,
 )
 
+from tron.enums import PovGameResult
+
 from tron.game_2d import GameState2D, Player2D
 
 from tron.ai.tron_model import TronModel
+from tron.ai.training import get_label_magnitude
 
 
 @dataclass(frozen=True)
 class ValueBenchmark:
 
     pov_game_state: PovGameState
-    expected_value: float
+    steps_until_terminal: int
+    hero_expected_result: PovGameResult
 
 
 @dataclass(frozen=True)
@@ -69,6 +73,14 @@ class TacticResult:
     pov_game_states: list[PovGameState]
     actual_hero_dirs: list[Direction]
     correct_moves: int
+
+
+@dataclass(frozen=True)
+class ValueBenchmarkResult:
+
+    benchmark: ValueBenchmark
+    expected_value: float
+    predicted_value: float
 
 
 # TODO: Add "null" p1 moves - test bot's "will to live"
@@ -169,7 +181,8 @@ TIES_5X5 = (
             hero_index=0,
             opponent_index=1,
         ),
-        expected_value=0.0,
+        steps_until_terminal=4,
+        hero_expected_result=PovGameResult.TIE,
     ),
     ValueBenchmark(
         pov_game_state=PovGameState(
@@ -191,7 +204,8 @@ TIES_5X5 = (
             hero_index=0,
             opponent_index=1,
         ),
-        expected_value=0.0,
+        steps_until_terminal=2,
+        hero_expected_result=PovGameResult.TIE,
     ),
 )
 
@@ -217,7 +231,8 @@ WINS_LOSSES_5X5 = (
             hero_index=0,
             opponent_index=1,
         ),
-        expected_value=1.0,
+        steps_until_terminal=1,
+        hero_expected_result=PovGameResult.WINNER,
     ),
     ValueBenchmark(
         pov_game_state=PovGameState(
@@ -239,7 +254,8 @@ WINS_LOSSES_5X5 = (
             hero_index=0,
             opponent_index=1,
         ),
-        expected_value=-1.0,
+        steps_until_terminal=1,
+        hero_expected_result=PovGameResult.LOSER,
     ),
     ValueBenchmark(
         pov_game_state=PovGameState(
@@ -261,7 +277,8 @@ WINS_LOSSES_5X5 = (
             hero_index=0,
             opponent_index=1,
         ),
-        expected_value=1.0,
+        steps_until_terminal=2,
+        hero_expected_result=PovGameResult.WINNER,
     ),
     ValueBenchmark(
         pov_game_state=PovGameState(
@@ -283,7 +300,8 @@ WINS_LOSSES_5X5 = (
             hero_index=0,
             opponent_index=1,
         ),
-        expected_value=-1.0,
+        steps_until_terminal=2,
+        hero_expected_result=PovGameResult.LOSER,
     ),
 )
 
@@ -360,33 +378,53 @@ def run_tactic(
     return results
 
 
-def run_value_benchmark(bench: ValueBenchmark, model: TronModel, run_symmetries=True):
+def run_value_benchmark(
+    bench: ValueBenchmark, model: TronModel, run_symmetries=True
+) -> list[ValueBenchmarkResult]:
 
     if run_symmetries:
-        pov_game_states = []
+        value_benchmarks = []
 
         for do_lr_flip, n_rot_90 in itertools.product([True, False], range(4)):
-            pov_game_states.append(
-                PovGameState(
-                    GameState.transform(
-                        bench.pov_game_state.game_state, do_lr_flip, n_rot_90
+
+            value_benchmarks.append(
+                ValueBenchmark(
+                    PovGameState(
+                        GameState.transform(
+                            bench.pov_game_state.game_state, do_lr_flip, n_rot_90
+                        ),
+                        bench.pov_game_state.hero_index,
+                        bench.pov_game_state.opponent_index,
                     ),
-                    bench.pov_game_state.hero_index,
-                    bench.pov_game_state.opponent_index,
-                )
+                    steps_until_terminal=bench.steps_until_terminal,
+                    hero_expected_result=bench.hero_expected_result
+                ),
             )
 
     else:
-        pov_game_states = [bench.pov_game_state]
+        value_benchmarks = [bench]
 
-    total_diff = 0.0
-    for pov_game_state in pov_game_states:
-        eval = model.run_inference(pov_game_state)
+    results = []
+    for vb in value_benchmarks:
 
-        # print(f"{bench.expected_value=}, actual eval={round(eval, 3)}")
-        total_diff += abs(bench.expected_value - eval)
+        if vb.hero_expected_result == PovGameResult.TIE:
+            eval = 0.0
+        else:
 
-    return total_diff / len(pov_game_states)
+            eval = get_label_magnitude(vb.steps_until_terminal)
+
+            if vb.hero_expected_result == PovGameResult.LOSER:
+                eval *= -1
+
+        results.append(
+            ValueBenchmarkResult(
+                vb,
+                expected_value=eval,
+                predicted_value=model.run_inference(vb.pov_game_state),
+            )
+        )
+
+    return results
 
 
 # TODO: Test by asserting match score is same with p1/p2 dir fn args switched

@@ -53,7 +53,7 @@ from tron.ai.benchmarks import (
 
 from tron.utils.sim import get_start_position
 
-from tron.utils.viz import render_tactic_benchmark_image
+from tron.utils.viz import render_tactic_benchmark_image, render_value_benchmark_image
 
 
 @dataclass
@@ -87,85 +87,120 @@ def benchmark(
     tactical_contexts: list[TacticalBenchmarkContext],
     match_contexts: list[MatchContext],
 ):
-
+    # Model value benchmarks
     for vc in value_contexts:
-        # Model value benchmarks
-        tie_benchmark_avg_score = sum(
-            [run_value_benchmark(b, vc.model) for b in TIES_5X5]
-        ) / len(TIES_5X5)
-        wl_benchmark_avg_score = sum(
-            [run_value_benchmark(b, vc.model) for b in WINS_LOSSES_5X5]
-        ) / len(WINS_LOSSES_5X5)
 
-        tb_writer.add_scalar(
-            f"Avg. Value Diff (Ties) ({vc.description})", tie_benchmark_avg_score, i
-        )
-        tb_writer.add_scalar(
-            f"Avg. Value Diff (W/Ls) ({vc.description})", wl_benchmark_avg_score, i
-        )
+        ties_cumulative_diff = 0.0
+        for j, vb in enumerate(TIES_5X5):
 
-    for tc in tactical_contexts:
-        # Tactical benchmarks
+            results = run_value_benchmark(vb, vc.model)
 
-        spatial_passes = spatial_fails = 0
+            viz = render_value_benchmark_image(results)
 
-        for j, t in enumerate(SPATIAL_TACTICS_5X5):
-
-            results = run_tactic(t, tc.dir_fn)
-
-            for r in results:
-
-                if r.correct_moves == len(r.tactic.opposing_dirs):
-                    spatial_passes += 1
-                else:
-                    spatial_fails += 1
-
-            viz = render_tactic_benchmark_image(results)
+            
+            imageio.imwrite(VIZ_OUT_DIR / f"{i}_{j}_ties.png", viz)
 
             tb_writer.add_image(
-                f"tactics/spatial/{j}",
+                f"value_benchmarks/ties/{vc.description}_{j}",
                 viz,
                 global_step=i,
                 dataformats="HWC",
             )
 
+            avg_diff = sum(
+                [abs(r.benchmark.expected_value - r.predicted_value) for r in results]
+            ) / len(results)
 
-
+            ties_cumulative_diff += avg_diff
 
         tb_writer.add_scalar(
-            f"Spatial Tactics Pass Rate ({tc.description})",
-            spatial_passes / (spatial_passes + spatial_fails),
-            i,
+            f"Avg. Value Diff (Ties) ({vc.description})", ties_cumulative_diff / len(TIES_5X5), i
         )
 
+        wl_cumulative_diff = 0.0
+        for j, vb in enumerate(WINS_LOSSES_5X5):
 
-        decisive_passes = decisive_fails = 0
+            results = run_value_benchmark(vb, vc.model)
 
-        for j, t in enumerate(DECISIVE_TACTICS_5X5):
+            viz = render_value_benchmark_image(results)
 
-            results = run_tactic(t, tc.dir_fn)
-
-            for r in results:
-
-                if r.correct_moves == len(r.tactic.opposing_dirs):
-                    decisive_passes += 1
-                else:
-                    decisive_fails += 1
-
-            viz = render_tactic_benchmark_image(results)
+            imageio.imwrite(VIZ_OUT_DIR / f"{i}_{j}_wl.png", viz)
 
             tb_writer.add_image(
-                f"tactics/decisive/{j}",
+                f"value_benchmarks/wins_losses/{vc.description}_{j}",
                 viz,
                 global_step=i,
                 dataformats="HWC",
             )
 
+            avg_diff = sum(
+                [abs(r.benchmark.expected_value - r.predicted_value) for r in results]
+            ) / len(results)
+
+            wl_cumulative_diff += avg_diff
+
         tb_writer.add_scalar(
-            f"Decisive Tactics Pass Rate ({tc.description})",
-            decisive_passes / (decisive_passes + decisive_fails),
-            i,
+            f"Avg. Value Diff (WLs) ({vc.description})", wl_cumulative_diff / len(WINS_LOSSES_5X5), i
         )
+
+    # for tc in tactical_contexts:
+    #     # Tactical benchmarks
+
+    #     spatial_passes = spatial_fails = 0
+
+    #     for j, t in enumerate(SPATIAL_TACTICS_5X5):
+
+    #         results = run_tactic(t, tc.dir_fn)
+
+    #         for r in results:
+
+    #             if r.correct_moves == len(r.tactic.opposing_dirs):
+    #                 spatial_passes += 1
+    #             else:
+    #                 spatial_fails += 1
+
+    #         viz = render_tactic_benchmark_image(results)
+
+    #         tb_writer.add_image(
+    #             f"tactics/spatial/{tc.description}_{j}",
+    #             viz,
+    #             global_step=i,
+    #             dataformats="HWC",
+    #         )
+
+    #     tb_writer.add_scalar(
+    #         f"Spatial Tactics Pass Rate ({tc.description})",
+    #         spatial_passes / (spatial_passes + spatial_fails),
+    #         i,
+    #     )
+
+    #     decisive_passes = decisive_fails = 0
+
+    #     for j, t in enumerate(DECISIVE_TACTICS_5X5):
+
+    #         results = run_tactic(t, tc.dir_fn)
+
+    #         for r in results:
+
+    #             if r.correct_moves == len(r.tactic.opposing_dirs):
+    #                 decisive_passes += 1
+    #             else:
+    #                 decisive_fails += 1
+
+    #         viz = render_tactic_benchmark_image(results)
+
+    #         tb_writer.add_image(
+    #             f"tactics/decisive/{tc.description}_{j}",
+    #             viz,
+    #             global_step=i,
+    #             dataformats="HWC",
+    #         )
+
+    #     tb_writer.add_scalar(
+    #         f"Decisive Tactics Pass Rate ({tc.description})",
+    #         decisive_passes / (decisive_passes + decisive_fails),
+    #         i,
+    #     )
 
     # Match score
 
@@ -182,6 +217,7 @@ def benchmark(
             p1_match_score,
             i,
         )
+
 
 
 def main():

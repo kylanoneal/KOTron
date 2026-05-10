@@ -23,6 +23,8 @@ from tron.game import (
     next,
 )
 
+from tron.enums import PovGameResult
+
 from tron.ai.tron_model import TronModel, RandomTronModel
 from tron.ai.nnue import NnueTronModel, QuantizedNnueTronModel
 
@@ -33,6 +35,7 @@ from tron.ai.training import (
     train_loop,
     make_dataloader,
     get_sos_info,
+    get_label_magnitude,
 )
 
 from tron.ai.algos import choose_direction_basic_minimax
@@ -51,7 +54,7 @@ from tron.ai.benchmarks import (
 
 from tron.utils.sim import get_start_position
 
-from tron.utils.viz import render_tactic_benchmark_image
+from tron.utils.viz import render_tactic_benchmark_image, render_value_benchmark_image
 
 
 @dataclass
@@ -72,57 +75,89 @@ class MatchContext:
     p2_bc: TacticalBenchmarkContext
     starting_positions: list[GameState]
 
+
+# TODO: Fix redundant code
 def benchmark(
     i,
     tb_writer,
+    make_visualizations: bool,
     value_contexts: list[ValueBenchmarkContext],
     tactical_contexts: list[TacticalBenchmarkContext],
     match_contexts: list[MatchContext],
 ):
-
+    # Model value benchmarks
     for vc in value_contexts:
-        # Model value benchmarks
-        tie_benchmark_avg_score = sum(
-            [run_value_benchmark(b, vc.model) for b in TIES_5X5]
-        ) / len(TIES_5X5)
-        wl_benchmark_avg_score = sum(
-            [run_value_benchmark(b, vc.model) for b in WINS_LOSSES_5X5]
-        ) / len(WINS_LOSSES_5X5)
 
-        tb_writer.add_scalar(
-            f"Avg. Value Diff (Ties) ({vc.description})", tie_benchmark_avg_score, i
-        )
-        tb_writer.add_scalar(
-            f"Avg. Value Diff (W/Ls) ({vc.description})", wl_benchmark_avg_score, i
-        )
+        results = []
+
+        for j, vb in enumerate(TIES_5X5):
+
+            results.extend(run_value_benchmark(vb, vc.model))
+
+        if make_visualizations:
+            viz = render_value_benchmark_image(results)
+
+            tb_writer.add_image(
+                f"value_benchmarks/ties/{vc.description}",
+                viz,
+                global_step=i,
+                dataformats="HWC",
+            )
+
+        avg_diff = sum(
+            [abs(r.expected_value - r.predicted_value) for r in results]
+        ) / len(results)
+
+        tb_writer.add_scalar(f"Avg. Value Diff (Ties) ({vc.description})", avg_diff, i)
+
+        results = []
+        for j, vb in enumerate(WINS_LOSSES_5X5):
+
+            results.extend(run_value_benchmark(vb, vc.model))
+
+        if make_visualizations:
+            viz = render_value_benchmark_image(results)
+
+            tb_writer.add_image(
+                f"value_benchmarks/wins_losses/{vc.description}",
+                viz,
+                global_step=i,
+                dataformats="HWC",
+            )
+
+        avg_diff = sum(
+            [abs(r.expected_value - r.predicted_value) for r in results]
+        ) / len(results)
+
+        tb_writer.add_scalar(f"Avg. Value Diff (WLs) ({vc.description})", avg_diff, i)
 
     for tc in tactical_contexts:
         # Tactical benchmarks
 
         spatial_passes = spatial_fails = 0
 
+        results = []
+
         for j, t in enumerate(SPATIAL_TACTICS_5X5):
 
-            results = run_tactic(t, tc.dir_fn)
+            results.extend(run_tactic(t, tc.dir_fn))
 
-            for r in results:
+        for r in results:
 
-                if r.correct_moves == len(r.tactic.opposing_dirs):
-                    spatial_passes += 1
-                else:
-                    spatial_fails += 1
+            if r.correct_moves == len(r.tactic.opposing_dirs):
+                spatial_passes += 1
+            else:
+                spatial_fails += 1
 
+        if make_visualizations:
             viz = render_tactic_benchmark_image(results)
 
             tb_writer.add_image(
-                f"tactics/spatial/{tc.description}_{j}",
+                f"tactics/spatial/{tc.description}",
                 viz,
                 global_step=i,
                 dataformats="HWC",
             )
-
-
-
 
         tb_writer.add_scalar(
             f"Spatial Tactics Pass Rate ({tc.description})",
@@ -130,24 +165,25 @@ def benchmark(
             i,
         )
 
-
         decisive_passes = decisive_fails = 0
+        results = []
 
         for j, t in enumerate(DECISIVE_TACTICS_5X5):
 
-            results = run_tactic(t, tc.dir_fn)
+            results.extend(run_tactic(t, tc.dir_fn))
 
-            for r in results:
+        for r in results:
 
-                if r.correct_moves == len(r.tactic.opposing_dirs):
-                    decisive_passes += 1
-                else:
-                    decisive_fails += 1
+            if r.correct_moves == len(r.tactic.opposing_dirs):
+                decisive_passes += 1
+            else:
+                decisive_fails += 1
 
+        if make_visualizations:
             viz = render_tactic_benchmark_image(results)
 
             tb_writer.add_image(
-                f"tactics/decisive/{tc.description}_{j}",
+                f"tactics/decisive/{tc.description}",
                 viz,
                 global_step=i,
                 dataformats="HWC",
@@ -189,10 +225,12 @@ def main():
     # args = parser.parse_args()
 
     BATCH_SIZE = 4
-    PRE_TRAIN_EPOCHS = 0 # 50
-    PRE_TRAIN_KEEP_RATE = 0.0025#0.1  
+    PRE_TRAIN_EPOCHS = 0  # 50
+    PRE_TRAIN_KEEP_RATE = 0.0025  # 0.1
     KEEP_RATE = 0.5
-    LR = 0.002 #0.01  # 0.001
+    LR = 0.002  # 0.01  # 0.001
+
+    STARTING_WEIGHTS = r"C:\Users\kylan\code\KOTron\tron-python\scripts\y2026\m05\old_runs\20260505-175141_quant_5x5_debug_v1\L0.001_B4\checkpoints\L0.001_B4_18245.pth"  # None
 
     ACC_DIM = 128
 
@@ -200,13 +238,13 @@ def main():
     # TEMP = args.temp
     # EXPLR_FACTOR = args.explr_factor
 
-    MCTS_ITERS = 128
+    MCTS_ITERS = 16
     TEMP = 0.4  # 0.7
     EXPLR_FACTOR = 2.0
 
     QUANT_SCALE = 256
 
-    RUN_DESCRIPTION = "quant_nnue_5x5"
+    RUN_DESCRIPTION = "quant_nnue_5x5_viz_testing"
 
     NUM_ROWS = NUM_COLS = 5
 
@@ -224,11 +262,12 @@ def main():
 
     PRETRAIN_PLAY_MATCH_EVERY_N = 2
     PLAY_MATCH_EVERY_N = 20
+    MAKE_VISUALIZATIONS_EVERY_N = 20
     N_MATCH_START_POSITIONS = 100
 
     ptkr_str = f"{PRE_TRAIN_KEEP_RATE:.4f}".replace(".", "p")
     RUN_UID = f"L{LR}_B{BATCH_SIZE}_MCITERS{MCTS_ITERS}_NOPRETRAIN_ACCDIM{ACC_DIM}"
-#    RUN_UID = f"L{LR}_B{BATCH_SIZE}_MCITERS{MCTS_ITERS}_PTKR{ptkr_str}_ACCDIM{ACC_DIM}"
+    #    RUN_UID = f"L{LR}_B{BATCH_SIZE}_MCITERS{MCTS_ITERS}_PTKR{ptkr_str}_ACCDIM{ACC_DIM}"
 
     ############################################
     # INITIALIZE MODELS
@@ -237,10 +276,9 @@ def main():
     # TODO: Train a model only on deep games as well?
     model = NnueTronModel(NUM_ROWS, NUM_COLS, acc_dim=ACC_DIM)
 
-    # state_dict = torch.load(
-    #     r"C:\Users\kylan\Documents\code\repos\KOTron\tron-python\scripts\y2025\m08\cnn\runs\20250810-224509_mcts_cnn_5x5\LR0.001_B4\checkpoints\LR0.001_B4_30.pth"
-    # )
-    # model.load_state_dict(state_dict, strict=True)
+    if STARTING_WEIGHTS is not None:
+        state_dict = torch.load(STARTING_WEIGHTS)
+        model.load_state_dict(state_dict, strict=True)
 
     criterion = torch.nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), amsgrad=True, lr=LR)
@@ -381,11 +419,16 @@ def main():
             benchmark(
                 i,
                 tb_writer,
+                i % MAKE_VISUALIZATIONS_EVERY_N == 0,
                 value_contexts=[
                     ValueBenchmarkContext(model, "non-quant model"),
                 ],
                 tactical_contexts=model_tactical_contexts,
-                match_contexts=pretrain_match_contexts if i % PRETRAIN_PLAY_MATCH_EVERY_N == 0 else [],
+                match_contexts=(
+                    pretrain_match_contexts
+                    if i % PRETRAIN_PLAY_MATCH_EVERY_N == 0
+                    else []
+                ),
             )
 
             # # Save the serialized data to a file.
@@ -554,6 +597,7 @@ def main():
         benchmark(
             i,
             tb_writer,
+            i % MAKE_VISUALIZATIONS_EVERY_N == 0,
             value_contexts=[
                 ValueBenchmarkContext(model, "non-quant model"),
                 ValueBenchmarkContext(quant_model, "quant model"),

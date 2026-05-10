@@ -5,7 +5,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from tron.ai.benchmarks import Tactic, TacticResult
+from tron.ai.benchmarks import Tactic, TacticResult, ValueBenchmarkResult
 from tron.game import GameStatus, PovGameState, get_status
 
 
@@ -77,6 +77,41 @@ class BenchmarkVizOptions:
     title_font_px: int = 64
     row_gap_px: int = 22
     separator_px: int = 2
+    font_path: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class ValueBenchmarkVizOptions:
+    board: BoardVizOptions = field(default_factory=BoardVizOptions)
+    background_color: Color = (17, 24, 39)
+    text_color: Color = (249, 250, 251)
+    diff_zero_color: Color = (34, 197, 94)
+    diff_yellow_color: Color = (234, 179, 8)
+    diff_orange_color: Color = (249, 115, 22)
+    diff_red_color: Color = (239, 68, 68)
+    padding_px: int = 14
+    board_text_gap_px: int = 18
+    text_width_px: int = 300
+    text_padding_px: int = 8
+    text_line_spacing_px: int = 6
+    text_font_px: int = 18
+    min_content_height_px: int = 160
+    diff_red_threshold: float = 1.0
+    diff_tint_alpha: float = 0.12
+    value_format: str = "{value:.2f}"
+    font_path: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class ValueBenchmarkGridVizOptions:
+    value: ValueBenchmarkVizOptions = field(default_factory=ValueBenchmarkVizOptions)
+    background_color: Color = (17, 24, 39)
+    title_color: Color = (249, 250, 251)
+    outer_padding_px: int = 18
+    title_height_px: int = 64
+    title_font_px: int = 40
+    grid_gap_px: int = 18
+    title_format: str = "Average diff: {average_diff:.3f}"
     font_path: Optional[str] = None
 
 
@@ -408,6 +443,143 @@ def render_tactic_benchmark_image(
     return image
 
 
+def render_value_benchmark_result_image(
+    result: ValueBenchmarkResult,
+    options: Optional[ValueBenchmarkVizOptions] = None,
+) -> np.ndarray:
+    """Render one value benchmark result as an RGB image.
+
+    Args:
+        result: Benchmark result containing the expected and predicted values.
+        options: Rendering options for board, text, and diff tint colors.
+
+    Returns:
+        An RGB numpy image with shape ``(height, width, 3)``.
+    """
+    options = options or ValueBenchmarkVizOptions()
+
+    board_image = render_game_state_image(result.benchmark.pov_game_state, options.board)
+    board_height, board_width, _ = board_image.shape
+
+    content_height = max(board_height, options.min_content_height_px)
+    width = (
+        2 * options.padding_px
+        + board_width
+        + options.board_text_gap_px
+        + options.text_width_px
+    )
+    height = 2 * options.padding_px + content_height
+
+    image = _make_canvas(width, height, options.background_color)
+
+    board_x = options.padding_px
+    board_y = options.padding_px + (content_height - board_height) // 2
+    _paste(image, board_image, board_x, board_y)
+
+    text_font = _load_font(options.font_path, options.text_font_px)
+    text_block = _draw_text_block(
+        width_px=options.text_width_px,
+        height_px=content_height,
+        lines=_value_benchmark_lines(result, options),
+        background_color=options.background_color,
+        text_color=options.text_color,
+        font=text_font,
+        padding_px=options.text_padding_px,
+        line_spacing_px=options.text_line_spacing_px,
+    )
+
+    text_x = board_x + board_width + options.board_text_gap_px
+    _paste(image, text_block, text_x, options.padding_px)
+
+    diff_color = _value_diff_color(_value_diff(result), options)
+    return _apply_tint(image, diff_color, options.diff_tint_alpha)
+
+
+def render_value_benchmark_image(
+    results: Sequence[ValueBenchmarkResult],
+    *,
+    num_rows: Optional[int] = None,
+    num_cols: Optional[int] = None,
+    options: Optional[ValueBenchmarkGridVizOptions] = None,
+    max_items: Optional[int] = None,
+) -> np.ndarray:
+    """Render value benchmark results as a titled grid image.
+
+    Args:
+        results: Value benchmark results to visualize.
+        num_rows: Optional number of grid rows.
+        num_cols: Optional number of grid columns.
+        options: Rendering options for cards, spacing, and title text.
+        max_items: Optional limit for how many results to render.
+
+    Returns:
+        An RGB numpy image with shape ``(height, width, 3)``.
+    """
+    options = options or ValueBenchmarkGridVizOptions()
+
+    visible_results = list(results)
+    if max_items is not None:
+        visible_results = visible_results[:max_items]
+
+    if not visible_results:
+        raise ValueError("At least one value benchmark result is required.")
+
+    grid_rows, grid_cols = _resolve_grid_shape(
+        len(visible_results),
+        num_rows,
+        num_cols,
+    )
+
+    cell_images = [
+        render_value_benchmark_result_image(result, options.value)
+        for result in visible_results
+    ]
+
+    cell_width = max(cell.shape[1] for cell in cell_images)
+    cell_height = max(cell.shape[0] for cell in cell_images)
+    content_width = grid_cols * cell_width + (grid_cols - 1) * options.grid_gap_px
+    content_height = grid_rows * cell_height + (grid_rows - 1) * options.grid_gap_px
+
+    width = content_width + 2 * options.outer_padding_px
+    height = (
+        2 * options.outer_padding_px
+        + options.title_height_px
+        + content_height
+    )
+
+    image = _make_canvas(width, height, options.background_color)
+
+    average_diff = sum(_value_diff(result) for result in visible_results) / len(
+        visible_results
+    )
+    title_font = _load_font(options.font_path, options.title_font_px)
+    title = options.title_format.format(average_diff=average_diff)
+    image = _draw_centered_text(
+        image,
+        title,
+        (
+            options.outer_padding_px,
+            options.outer_padding_px,
+            width - options.outer_padding_px,
+            options.outer_padding_px + options.title_height_px,
+        ),
+        title_font,
+        options.title_color,
+    )
+
+    grid_y = options.outer_padding_px + options.title_height_px
+    for index, cell in enumerate(cell_images):
+        row = index // grid_cols
+        col = index % grid_cols
+        x = options.outer_padding_px + col * (cell_width + options.grid_gap_px)
+        y = grid_y + row * (cell_height + options.grid_gap_px)
+        x += (cell_width - cell.shape[1]) // 2
+        y += (cell_height - cell.shape[0]) // 2
+        _paste(image, cell, x, y)
+
+    return image
+
+
 def _move_lines(tactic: Tactic, result: TacticResult, step: int) -> List[str]:
     """Build display lines for one tactic step.
 
@@ -476,6 +648,89 @@ def _tactic_score(tactic: Tactic, result: TacticResult) -> float:
 def _tactic_passed(tactic: Tactic, result: TacticResult) -> bool:
     """Return whether every opposing move was answered correctly."""
     return result.correct_moves == len(tactic.opposing_dirs)
+
+
+def _value_benchmark_lines(
+    result: ValueBenchmarkResult,
+    options: ValueBenchmarkVizOptions,
+) -> List[str]:
+    """Build display lines for a value benchmark result."""
+    expected = result.expected_value
+    actual = result.predicted_value
+    diff = abs(actual - expected)
+
+    return [
+        f"Expected Evaluation: {options.value_format.format(value=expected)}",
+        f"Actual Evaluation: {options.value_format.format(value=actual)}",
+        f"Diff: {options.value_format.format(value=diff)}",
+    ]
+
+
+def _value_diff(result: ValueBenchmarkResult) -> float:
+    """Return the absolute prediction error for a value benchmark result."""
+    return abs(result.predicted_value - result.expected_value)
+
+
+def _value_diff_color(
+    diff: float,
+    options: ValueBenchmarkVizOptions,
+) -> Color:
+    """Return a green-yellow-orange-red color for a value diff."""
+    if options.diff_red_threshold <= 0:
+        return options.diff_red_color
+
+    ratio = min(max(diff / options.diff_red_threshold, 0.0), 1.0)
+    stops = (
+        (0.0, options.diff_zero_color),
+        (0.4, options.diff_yellow_color),
+        (0.7, options.diff_orange_color),
+        (1.0, options.diff_red_color),
+    )
+
+    for idx in range(len(stops) - 1):
+        left_pos, left_color = stops[idx]
+        right_pos, right_color = stops[idx + 1]
+
+        if ratio <= right_pos:
+            local_ratio = (ratio - left_pos) / (right_pos - left_pos)
+            return _interpolate_color(left_color, right_color, local_ratio)
+
+    return options.diff_red_color
+
+
+def _interpolate_color(start: Color, end: Color, ratio: float) -> Color:
+    """Linearly interpolate between two RGB colors."""
+    return tuple(
+        int(round(start[i] * (1.0 - ratio) + end[i] * ratio))
+        for i in range(3)
+    )
+
+
+def _resolve_grid_shape(
+    num_items: int,
+    num_rows: Optional[int],
+    num_cols: Optional[int],
+) -> Tuple[int, int]:
+    """Resolve a grid shape that can contain every item."""
+    if num_rows is None and num_cols is None:
+        num_cols = math.ceil(math.sqrt(num_items))
+        num_rows = math.ceil(num_items / num_cols)
+    elif num_rows is None:
+        if num_cols is None or num_cols <= 0:
+            raise ValueError("num_cols must be positive.")
+        num_rows = math.ceil(num_items / num_cols)
+    elif num_cols is None:
+        if num_rows <= 0:
+            raise ValueError("num_rows must be positive.")
+        num_cols = math.ceil(num_items / num_rows)
+
+    if num_rows <= 0 or num_cols <= 0:
+        raise ValueError("num_rows and num_cols must be positive.")
+
+    if num_rows * num_cols < num_items:
+        raise ValueError("Grid shape is too small for the provided results.")
+
+    return num_rows, num_cols
 
 
 def _get_outcome_color(

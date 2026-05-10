@@ -49,6 +49,15 @@ def collate_fn(x):
     return inputs, labels
 
 
+def get_label_magnitude(steps_until_terminal: int):
+
+    assert steps_until_terminal >= 1
+    assert isinstance(steps_until_terminal, int)
+
+
+    return 0.8 ** (steps_until_terminal - 1)
+
+
 def make_dataloader(
     game_data: list[list[GameState]],
     batch_size: int,
@@ -107,11 +116,13 @@ def make_dataloader(
                     #     else -game_prog
                     # )
 
-                    dist_from_end = num_active_turns - (i + 1)
+                    steps_until_terminal = num_active_turns - i
+
+                    assert steps_until_terminal >= 1
 
                     # eval = 10 * (0.9 ** dist_from_end)
 
-                    eval = 0.8**dist_from_end
+                    eval = get_label_magnitude(steps_until_terminal)
 
                     if terminal_status.winner_index != player_index:
                         eval *= -1
