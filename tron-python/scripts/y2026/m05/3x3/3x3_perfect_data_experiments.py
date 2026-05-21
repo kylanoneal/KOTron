@@ -35,7 +35,8 @@ from tron.ai.MCTS import MctsContext
 
 from tron.ai.training import (
     TrainValSplit,
-    train_loop,
+    train,
+    validate,
     make_dataset,
     make_k_folds,
     make_batches,
@@ -81,7 +82,7 @@ def main():
 
     tron_dir = Path(tron.__file__).resolve().parent.parent
     DATA_PATH = tron_dir / r"scripts\y2026\m05\perfect_data\3x3.pkl"
-    
+
     K_FOLDS = 4
     PRE_TRAIN_EPOCHS = 1_000_000  # 50
 
@@ -154,12 +155,13 @@ def main():
             )
         )
 
-
     ############################################
     # TRAIN
     ############################################
 
     for i in range(PRE_TRAIN_EPOCHS):
+
+        cum_epoch_train_loss = cum_epoch_val_loss = 0.0
 
         for j, cv_context in enumerate(cross_val_contexts):
 
@@ -173,12 +175,21 @@ def main():
                 cv_context.train_val_split.train_examples,
                 batch_size=BATCH_SIZE,
                 shuffle=True,
-                seed=i
+                seed=i,
             )
 
+            training_result = train(
+                cv_context.model,
+                train_ds,
+                cv_context.optim,
+                cv_context.criterion,
+                epochs=1,
+            )
 
-            training_result = train_loop(
-                cv_context.model, train_ds, cv_context.optim, cv_context.criterion, epochs=1
+            avg_validation_loss = validate(
+                cv_context.model,
+                cv_context.train_val_split.val_examples,
+                cv_context.criterion,
             )
 
             model_tensorboard_update(
@@ -187,6 +198,7 @@ def main():
                 cv_context.model,
                 model_desc=f"cvsplit{j}",
                 training_result=training_result,
+                validation_loss=avg_validation_loss,
                 make_visualizations=i % MAKE_VISUALIZATIONS_EVERY_N == 0,
             )
 
@@ -194,6 +206,14 @@ def main():
                 cv_context.model.state_dict(),
                 checkpoints_dir / f"{RUN_UID}_epoch{i}_cvsplit{j}.pth",
             )
+
+
+            cum_epoch_train_loss += training_result.avg_loss
+            cum_epoch_val_loss += avg_validation_loss
+
+        
+        tb_writer.add_scalar(f"aggregate_train_loss", cum_epoch_train_loss / K_FOLDS, i)
+        tb_writer.add_scalar(f"aggregate_val_loss", cum_epoch_val_loss / K_FOLDS, i)
 
 
 if __name__ == "__main__":

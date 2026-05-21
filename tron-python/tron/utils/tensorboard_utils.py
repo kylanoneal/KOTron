@@ -83,6 +83,7 @@ def model_tensorboard_update(
     model: TronModel,
     model_desc: str,
     training_result: TrainingResult,
+    validation_loss: float,
     make_visualizations: bool
 ):
 
@@ -96,10 +97,12 @@ def model_tensorboard_update(
         print(f"{param:40s} {sos_val}")
 
     tb_writer.add_scalar(f"weights_sos/{model_desc}", total_sos, i)
-    tb_writer.add_scalar(f"avg_loss/{model_desc}", training_result.avg_loss, i)
+    tb_writer.add_scalar(f"avg_train_loss/{model_desc}", training_result.avg_loss, i)
     tb_writer.add_scalar(
        f"avg_pred_magnitude/{model_desc}", training_result.avg_prediction_magnitude, i
     )
+
+    tb_writer.add_scalar(f"avg_val_loss/{model_desc}", validation_loss, i)
 
     if make_visualizations:
 

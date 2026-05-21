@@ -231,7 +231,7 @@ def make_dataset(
     return tuple(dataset)
 
 
-def train_loop(
+def train(
     model: TronModel,
     dataset: tuple[tuple[LabeledExample]],
     optimizer,
@@ -304,3 +304,34 @@ def train_loop(
         avg_loss=average_loss,
         avg_prediction_magnitude=average_magnitude,
     )
+
+
+def validate(
+    model: TronModel,
+    validation_set: tuple[LabeledExample, ...],
+    criterion,
+    device=torch.device("cpu"),
+) -> float:
+    
+    
+    model.eval()
+
+    cum_loss = 0.0
+
+    with torch.no_grad():
+        for ex in validation_set:
+            inputs = model.get_model_input([ex.pov_game_state])
+            labels = torch.tensor([ex.label])
+
+            if device.type == "cuda":
+                inputs = inputs.to(device)
+                labels = labels.to(device)
+
+            outputs = model(inputs)
+
+            loss = criterion(outputs, labels)
+            cum_loss += loss.item()
+
+    avg_loss = cum_loss / len(validation_set)
+
+    return avg_loss
