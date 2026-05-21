@@ -3,6 +3,8 @@ import torch
 import random
 import numpy as np
 from typing import Optional
+from dataclasses import dataclass
+
 from torch.utils.data import Dataset, DataLoader
 
 import tron
@@ -16,6 +18,31 @@ from tron.game import (
     from_bitboard,
 )
 from tron.ai.tron_model import TronModel, PovGameState
+
+
+@dataclass(frozen=True)
+class LabeledExample:
+    pov_game_state: PovGameState
+    label: float
+
+
+@dataclass(frozen=True)
+class ModelExample:
+    labeled_example: LabeledExample
+    prediction: float
+
+
+@dataclass(frozen=True)
+class TrainingResult:
+    model_examples: tuple[ModelExample]
+    avg_loss: float
+    avg_prediction_magnitude: float
+
+
+@dataclass(frozen=True)
+class TrainValSplit:
+    train_examples: tuple[LabeledExample]
+    val_examples: tuple[LabeledExample]
 
 
 # NOTE: Where does this belong?
@@ -42,11 +69,62 @@ def get_sos_info(model):
     return sos_dict, total_sos
 
 
-def collate_fn(x):
-    inputs, labels = zip(*x)
-    labels = torch.tensor(labels)
+def make_batches(
+    items: tuple[LabeledExample],
+    batch_size: int,
+    shuffle: bool,
+    seed: Optional[int] = None,
+) -> tuple[tuple[LabeledExample]]:
 
-    return inputs, labels
+    if shuffle:
+        rng = random.Random(seed)
+
+        items = list(items)
+        rng.shuffle(items)
+
+        items = tuple(items)
+
+    return tuple([items[i : i + batch_size] for i in range(0, len(items), batch_size)])
+
+
+def make_k_folds(
+    items: tuple[LabeledExample],
+    k: int,
+    shuffle: bool = True,
+    seed: int = 0,
+) -> tuple[TrainValSplit]:
+
+    if k <= 1:
+        raise ValueError("k must be greater than 1")
+
+    if k > len(items):
+        raise ValueError("k cannot be greater than len(items)")
+
+    rng = random.Random(seed)
+
+    items = list(items)
+    if shuffle:
+        rng.shuffle(items)
+
+    fold_sizes = [len(items) // k] * k
+
+    # Distribute remainder across the first folds
+    for i in range(len(items) % k):
+        fold_sizes[i] += 1
+
+    folds = []
+    start = 0
+
+    for fold_size in fold_sizes:
+        end = start + fold_size
+        val_items = items[start:end]
+        train_items = items[:start] + items[end:]
+
+        folds.append(TrainValSplit(train_items, val_items))
+
+        start = end
+
+    return tuple(folds)
 
 
 def get_label_magnitude(steps_until_terminal: int):
@@ -54,18 +132,17 @@ def get_label_magnitude(steps_until_terminal: int):
     assert steps_until_terminal >= 1
     assert isinstance(steps_until_terminal, int)
 
-
     return 0.8 ** (steps_until_terminal - 1)
 
 
-def make_dataloader(
-    game_data: list[list[GameState]],
-    batch_size: int,
+def make_dataset(
+    game_data: tuple[tuple[GameState]],
+    batch_size: Optional[int] = None,
     shuffle: bool = True,
     include_ties=True,
     do_affine=True,
     keep_rate=0.5,
-) -> DataLoader:
+) -> tuple[tuple[LabeledExample]]:
 
     dataset = []
 
@@ -105,29 +182,18 @@ def make_dataloader(
                 assert len(game_state.players) == 2
                 assert tron.get_status(game_state).status == GameStatus.IN_PROGRESS
 
-                # if game_prog < 0.7:
-                #     print(f"Skipping game prog of : {game_prog}")
-                #     continue
-
                 if terminal_status.status == GameStatus.WINNER:
-                    # eval = (
-                    #     game_prog
-                    #     if terminal_status.winner_index == player_index
-                    #     else -game_prog
-                    # )
 
                     steps_until_terminal = num_active_turns - i
 
                     assert steps_until_terminal >= 1
 
-                    # eval = 10 * (0.9 ** dist_from_end)
-
-                    eval = get_label_magnitude(steps_until_terminal)
+                    label = get_label_magnitude(steps_until_terminal)
 
                     if terminal_status.winner_index != player_index:
-                        eval *= -1
+                        label *= -1
                 else:
-                    eval = 0.0
+                    label = 0.0
 
                 if random.random() < keep_rate:
 
@@ -143,23 +209,31 @@ def make_dataloader(
 
                     dataset.append(
                         (
-                            PovGameState(
-                                game_state_to_add,
-                                hero_index=player_index,
-                                opponent_index=opponent_index,
-                            ),
-                            np.float32(eval),
+                            LabeledExample(
+                                pov_game_state=PovGameState(
+                                    game_state_to_add,
+                                    hero_index=player_index,
+                                    opponent_index=opponent_index,
+                                ),
+                                label=label,
+                            )
                         )
                     )
 
-    return DataLoader(
-        dataset, batch_size=batch_size, shuffle=shuffle, collate_fn=collate_fn
-    )
+    if shuffle:
+        random.shuffle(dataset)
+
+    if batch_size is not None:
+        dataset = make_batches(
+            dataset, batch_size, shuffle=False
+        )  # Shuffle already handled
+
+    return tuple(dataset)
 
 
 def train_loop(
     model: TronModel,
-    train_dataloader: DataLoader,
+    dataset: tuple[tuple[LabeledExample]],
     optimizer,
     criterion,
     device=torch.device("cpu"),
@@ -168,8 +242,14 @@ def train_loop(
 
     model.train()
 
+    # TODO: Instead of computing stats like avg_loss in train loop, just
+    # provide per example loss (for example) and let something else handle
+    # the stats
+
     cum_loss = 0.0
     cum_magnitude = 0.0
+
+    model_examples: tuple[tuple[ModelExample]] = []
 
     # Iterate through the DataLoader in a training loop
     for epoch in range(epochs):
@@ -177,11 +257,16 @@ def train_loop(
         cum_epoch_loss = 0.0
         cum_epoch_magnitude = 0.0
 
-        for _inputs, _labels in train_dataloader:
-            # Move data to GPU if available
+        for batch in dataset:
 
-            inputs = model.get_model_input(_inputs).to(device)
-            labels = _labels.to(device)
+            inputs = model.get_model_input([ex.pov_game_state for ex in batch])
+            labels = torch.tensor([ex.label for ex in batch])
+
+            if device.type == "cuda":
+                # Move data to GPU if available
+
+                inputs = inputs.to(device)
+                labels = labels.to(device)
 
             # if np.random.random() < 0.01:
             #     print(f"Mean labels: {labels.mean()}")
@@ -192,6 +277,10 @@ def train_loop(
             # Forward pass, loss computation, backward pass, optimizer step, etc.
             outputs = model(inputs)
 
+            for train_example, o in zip(batch, outputs):
+
+                model_examples.append(ModelExample(train_example, o.item()))
+
             cum_epoch_magnitude += torch.sum(torch.abs(outputs)).item() / len(outputs)
 
             loss = criterion(outputs, labels)
@@ -201,12 +290,17 @@ def train_loop(
 
             cum_epoch_loss += loss.item()
 
-        epoch_avg_loss = cum_epoch_loss / len(train_dataloader)
-        epoch_avg_magnitude = cum_epoch_magnitude / len(train_dataloader)
+        epoch_avg_loss = cum_epoch_loss / len(dataset)
+        epoch_avg_magnitude = cum_epoch_magnitude / len(dataset)
 
         cum_loss += epoch_avg_loss
         cum_magnitude += epoch_avg_magnitude
 
     average_loss = cum_loss / epochs
     average_magnitude = cum_magnitude / epochs
-    return average_loss, average_magnitude
+
+    return TrainingResult(
+        model_examples,
+        avg_loss=average_loss,
+        avg_prediction_magnitude=average_magnitude,
+    )

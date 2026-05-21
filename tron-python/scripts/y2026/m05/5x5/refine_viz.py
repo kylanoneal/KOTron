@@ -43,7 +43,7 @@ from tron.ai.benchmarks import (
     SPATIAL_TACTICS_5X5,
     DECISIVE_TACTICS_5X5,
     TIES_5X5,
-    WINS_LOSSES_5X5,
+    DECISIVE_5X5,
     Tactic,
     TacticResult,
     match,
@@ -118,7 +118,7 @@ def benchmark(
         )
 
         wl_cumulative_diff = 0.0
-        for j, vb in enumerate(WINS_LOSSES_5X5):
+        for j, vb in enumerate(DECISIVE_5X5):
 
             results = run_value_benchmark(vb, vc.model)
 
@@ -140,7 +140,7 @@ def benchmark(
             wl_cumulative_diff += avg_diff
 
         tb_writer.add_scalar(
-            f"Avg. Value Diff (WLs) ({vc.description})", wl_cumulative_diff / len(WINS_LOSSES_5X5), i
+            f"Avg. Value Diff (WLs) ({vc.description})", wl_cumulative_diff / len(DECISIVE_5X5), i
         )
 
     # for tc in tactical_contexts:

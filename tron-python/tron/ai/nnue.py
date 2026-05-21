@@ -8,12 +8,14 @@ from tron.game import GameState, PovGameState, get_wall_indices
 
 # --- 2. Define the efficient‐updatable net ---
 class NnueTronModel(TronModel):
-    def __init__(self, num_rows, num_cols, acc_dim=128):
+    def __init__(self, num_rows: int, num_cols: int, acc_dim: int):
         super().__init__()
         # Embedding table: feature → acc_dim vector
         self.embedding = nn.Embedding(num_rows * num_cols * 3, acc_dim)
         # Tiny MLP on top of the accumulator
-        self.fc1 = nn.Linear(acc_dim, 1)
+        self.fc1 = nn.Linear(acc_dim, 8)
+        self.fc2 = nn.Linear(8, 16)
+        self.fc_value = nn.Linear(16, 1)
 
         self.num_rows = num_rows
         self.num_cols = num_cols
@@ -50,7 +52,15 @@ class NnueTronModel(TronModel):
         # x = torch.clamp(acc, min=0.0, max=127.0)  # mimic 8-bit clamp
 
         x = torch.clamp(acc, min=0.0, max=1.0)
-        out = self.fc1(x)
+
+        x = self.fc1(x)
+        x = torch.clamp(x, min=0.0, max=1.0)
+
+        x = self.fc2(x)
+        x = torch.clamp(x, min=0.0, max=1.0)
+
+        out = self.fc_value(x)
+
         return out.squeeze(-1)
 
     def emb_idx_wall(self, idx):
@@ -108,6 +118,7 @@ class QuantizedNnueTronModel(TronModel):
     def __init__(self, model: NnueTronModel, scale=256):
 
         assert isinstance(model, NnueTronModel)
+        raise NotImplementedError("We have more than 2 layers now")
 
         super().__init__()
         self.raw_model = model

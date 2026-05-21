@@ -21,7 +21,7 @@ from tron.enums import PovGameResult
 from tron.game_2d import GameState2D, Player2D
 
 from tron.ai.tron_model import TronModel
-from tron.ai.training import get_label_magnitude
+from tron.ai.training import get_label_magnitude, ModelExample, LabeledExample
 
 
 @dataclass(frozen=True)
@@ -210,7 +210,7 @@ TIES_5X5 = (
 )
 
 # TODO: Add perspective switches
-WINS_LOSSES_5X5 = (
+DECISIVE_5X5 = (
     ValueBenchmark(
         pov_game_state=PovGameState(
             game_state=from_2d_game_state(
@@ -380,7 +380,7 @@ def run_tactic(
 
 def run_value_benchmark(
     bench: ValueBenchmark, model: TronModel, run_symmetries=True
-) -> list[ValueBenchmarkResult]:
+) -> list[ModelExample]:
 
     if run_symmetries:
         value_benchmarks = []
@@ -397,7 +397,7 @@ def run_value_benchmark(
                         bench.pov_game_state.opponent_index,
                     ),
                     steps_until_terminal=bench.steps_until_terminal,
-                    hero_expected_result=bench.hero_expected_result
+                    hero_expected_result=bench.hero_expected_result,
                 ),
             )
 
@@ -408,20 +408,18 @@ def run_value_benchmark(
     for vb in value_benchmarks:
 
         if vb.hero_expected_result == PovGameResult.TIE:
-            eval = 0.0
+            label = 0.0
         else:
 
-            eval = get_label_magnitude(vb.steps_until_terminal)
+            label = get_label_magnitude(vb.steps_until_terminal)
 
             if vb.hero_expected_result == PovGameResult.LOSER:
-                eval *= -1
+                label *= -1
+
+        labeled_example = LabeledExample(vb.pov_game_state, label=label)
 
         results.append(
-            ValueBenchmarkResult(
-                vb,
-                expected_value=eval,
-                predicted_value=model.run_inference(vb.pov_game_state),
-            )
+            ModelExample(labeled_example, model.run_inference(vb.pov_game_state))
         )
 
     return results

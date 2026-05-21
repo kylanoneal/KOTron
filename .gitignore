@@ -52,3 +52,6 @@ htmlcov/
 # Optional: tox/nox caches if you use them
 .tox/
 .nox/
+
+*.png
+*.pkl

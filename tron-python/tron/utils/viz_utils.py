@@ -5,7 +5,8 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from tron.ai.benchmarks import Tactic, TacticResult, ValueBenchmarkResult
+from tron.ai.benchmarks import Tactic, TacticResult
+from tron.ai.training import ModelExample
 from tron.game import GameStatus, PovGameState, get_status
 
 
@@ -81,7 +82,7 @@ class BenchmarkVizOptions:
 
 
 @dataclass(frozen=True)
-class ValueBenchmarkVizOptions:
+class ModelExampleVizOptions:
     board: BoardVizOptions = field(default_factory=BoardVizOptions)
     background_color: Color = (17, 24, 39)
     text_color: Color = (249, 250, 251)
@@ -94,7 +95,7 @@ class ValueBenchmarkVizOptions:
     text_width_px: int = 300
     text_padding_px: int = 8
     text_line_spacing_px: int = 6
-    text_font_px: int = 18
+    text_font_px: int = 32
     min_content_height_px: int = 160
     diff_red_threshold: float = 1.0
     diff_tint_alpha: float = 0.12
@@ -103,8 +104,8 @@ class ValueBenchmarkVizOptions:
 
 
 @dataclass(frozen=True)
-class ValueBenchmarkGridVizOptions:
-    value: ValueBenchmarkVizOptions = field(default_factory=ValueBenchmarkVizOptions)
+class ModelExampleGridVizOptions:
+    value: ModelExampleVizOptions = field(default_factory=ModelExampleVizOptions)
     background_color: Color = (17, 24, 39)
     title_color: Color = (249, 250, 251)
     outer_padding_px: int = 18
@@ -443,22 +444,22 @@ def render_tactic_benchmark_image(
     return image
 
 
-def render_value_benchmark_result_image(
-    result: ValueBenchmarkResult,
-    options: Optional[ValueBenchmarkVizOptions] = None,
+def render_model_example_result_image(
+    example: ModelExample,
+    options: Optional[ModelExampleVizOptions] = None,
 ) -> np.ndarray:
-    """Render one value benchmark result as an RGB image.
+    """Render one model example as an RGB image.
 
     Args:
-        result: Benchmark result containing the expected and predicted values.
+        example: Model example containing the expected and predicted values.
         options: Rendering options for board, text, and diff tint colors.
 
     Returns:
         An RGB numpy image with shape ``(height, width, 3)``.
     """
-    options = options or ValueBenchmarkVizOptions()
+    options = options or ModelExampleVizOptions()
 
-    board_image = render_game_state_image(result.benchmark.pov_game_state, options.board)
+    board_image = render_game_state_image(example.labeled_example.pov_game_state, options.board)
     board_height, board_width, _ = board_image.shape
 
     content_height = max(board_height, options.min_content_height_px)
@@ -480,7 +481,7 @@ def render_value_benchmark_result_image(
     text_block = _draw_text_block(
         width_px=options.text_width_px,
         height_px=content_height,
-        lines=_value_benchmark_lines(result, options),
+        lines=_model_example_lines(example, options),
         background_color=options.background_color,
         text_color=options.text_color,
         font=text_font,
@@ -491,22 +492,22 @@ def render_value_benchmark_result_image(
     text_x = board_x + board_width + options.board_text_gap_px
     _paste(image, text_block, text_x, options.padding_px)
 
-    diff_color = _value_diff_color(_value_diff(result), options)
+    diff_color = _value_diff_color(_value_diff(example), options)
     return _apply_tint(image, diff_color, options.diff_tint_alpha)
 
 
-def render_value_benchmark_image(
-    results: Sequence[ValueBenchmarkResult],
+def render_model_example_image(
+    examples: Sequence[ModelExample],
     *,
     num_rows: Optional[int] = None,
     num_cols: Optional[int] = None,
-    options: Optional[ValueBenchmarkGridVizOptions] = None,
+    options: Optional[ModelExampleGridVizOptions] = None,
     max_items: Optional[int] = None,
 ) -> np.ndarray:
-    """Render value benchmark results as a titled grid image.
+    """Render model examples as a titled grid image.
 
     Args:
-        results: Value benchmark results to visualize.
+        examples: Model examples to visualize.
         num_rows: Optional number of grid rows.
         num_cols: Optional number of grid columns.
         options: Rendering options for cards, spacing, and title text.
@@ -515,24 +516,24 @@ def render_value_benchmark_image(
     Returns:
         An RGB numpy image with shape ``(height, width, 3)``.
     """
-    options = options or ValueBenchmarkGridVizOptions()
+    options = options or ModelExampleGridVizOptions()
 
-    visible_results = list(results)
+    visible_examples = list(examples)
     if max_items is not None:
-        visible_results = visible_results[:max_items]
+        visible_examples = visible_examples[:max_items]
 
-    if not visible_results:
-        raise ValueError("At least one value benchmark result is required.")
+    if not visible_examples:
+        raise ValueError("At least one model example is required.")
 
     grid_rows, grid_cols = _resolve_grid_shape(
-        len(visible_results),
+        len(visible_examples),
         num_rows,
         num_cols,
     )
 
     cell_images = [
-        render_value_benchmark_result_image(result, options.value)
-        for result in visible_results
+        render_model_example_result_image(result, options.value)
+        for result in visible_examples
     ]
 
     cell_width = max(cell.shape[1] for cell in cell_images)
@@ -549,8 +550,8 @@ def render_value_benchmark_image(
 
     image = _make_canvas(width, height, options.background_color)
 
-    average_diff = sum(_value_diff(result) for result in visible_results) / len(
-        visible_results
+    average_diff = sum(_value_diff(result) for result in visible_examples) / len(
+        visible_examples
     )
     title_font = _load_font(options.font_path, options.title_font_px)
     title = options.title_format.format(average_diff=average_diff)
@@ -650,30 +651,30 @@ def _tactic_passed(tactic: Tactic, result: TacticResult) -> bool:
     return result.correct_moves == len(tactic.opposing_dirs)
 
 
-def _value_benchmark_lines(
-    result: ValueBenchmarkResult,
-    options: ValueBenchmarkVizOptions,
+def _model_example_lines(
+    ex: ModelExample,
+    options: ModelExampleVizOptions,
 ) -> List[str]:
-    """Build display lines for a value benchmark result."""
-    expected = result.expected_value
-    actual = result.predicted_value
+    """Build display lines for a model example."""
+    expected = ex.labeled_example.label
+    actual = ex.prediction
     diff = abs(actual - expected)
 
     return [
-        f"Expected Evaluation: {options.value_format.format(value=expected)}",
-        f"Actual Evaluation: {options.value_format.format(value=actual)}",
+        f"Label: {options.value_format.format(value=expected)}",
+        f"Prediction: {options.value_format.format(value=actual)}",
         f"Diff: {options.value_format.format(value=diff)}",
     ]
 
 
-def _value_diff(result: ValueBenchmarkResult) -> float:
-    """Return the absolute prediction error for a value benchmark result."""
-    return abs(result.predicted_value - result.expected_value)
+def _value_diff(ex: ModelExample) -> float:
+    """Return the absolute prediction error for a model example result."""
+    return abs(ex.prediction - ex.labeled_example.label)
 
 
 def _value_diff_color(
     diff: float,
-    options: ValueBenchmarkVizOptions,
+    options: ModelExampleVizOptions,
 ) -> Color:
     """Return a green-yellow-orange-red color for a value diff."""
     if options.diff_red_threshold <= 0:

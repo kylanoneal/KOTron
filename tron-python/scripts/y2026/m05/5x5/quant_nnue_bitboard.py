@@ -21,6 +21,7 @@ from tron.game import (
     StatusInfo,
     Direction,
     next,
+    get_possible_directions,
 )
 
 from tron.enums import PovGameResult
@@ -32,8 +33,11 @@ from tron.ai import MCTS
 from tron.ai.MCTS import MctsContext
 
 from tron.ai.training import (
+    TrainingResult,
+    LabeledExample,
+    ModelExample,
     train_loop,
-    make_dataloader,
+    make_dataset,
     get_sos_info,
     get_label_magnitude,
 )
@@ -44,7 +48,7 @@ from tron.ai.benchmarks import (
     SPATIAL_TACTICS_5X5,
     DECISIVE_TACTICS_5X5,
     TIES_5X5,
-    WINS_LOSSES_5X5,
+    DECISIVE_5X5,
     Tactic,
     TacticResult,
     match,
@@ -54,7 +58,7 @@ from tron.ai.benchmarks import (
 
 from tron.utils.sim import get_start_position
 
-from tron.utils.viz import render_tactic_benchmark_image, render_value_benchmark_image
+from tron.utils.viz import render_tactic_benchmark_image, render_model_example_image
 
 
 @dataclass
@@ -75,8 +79,79 @@ class MatchContext:
     p2_bc: TacticalBenchmarkContext
     starting_positions: list[GameState]
 
+# NOTE: Does not guarantee game didn't end on next state 
+# e.g. players chose to crash into each other to secure tie
+def is_one_move_from_terminal(game_state: GameState):
 
-# TODO: Fix redundant code
+    assert len(game_state.players) == 2
+    assert tron.get_status(game_state).status == GameStatus.IN_PROGRESS
+
+    p1_dirs = get_possible_directions(game_state, 0)
+    p2_dirs = get_possible_directions(game_state, 1)
+
+    if len(p1_dirs) == 0 or len(p2_dirs) == 0:
+        return True
+    elif len(p1_dirs) == 1 and len(p2_dirs) == 1:
+        next_state = next(game_state, (p1_dirs[0], p2_dirs[0]))
+
+        if tron.get_status(next_state).status != GameStatus.IN_PROGRESS:
+            return True
+    else:
+        return False
+
+
+def model_tensorboard_update(
+    i: int,
+    tb_writer: SummaryWriter,
+    model: TronModel,
+    training_result: TrainingResult,
+    make_visualizations: bool,
+):
+
+    print(
+        f"{training_result.avg_loss=:.3f}, {training_result.avg_prediction_magnitude=:.3f}"
+    )
+
+    sos_dict, total_sos = get_sos_info(model)
+    print("\nSum of squares (weights/biases):")
+    for param, sos_val in sos_dict.items():
+        print(f"{param:40s} {sos_val}")
+
+    tb_writer.add_scalar("Weights Sum of Squares", total_sos, i)
+    tb_writer.add_scalar("Average Loss", training_result.avg_loss, i)
+    tb_writer.add_scalar(
+        "Average Prediction Magnitude", training_result.avg_prediction_magnitude, i
+    )
+
+    if make_visualizations:
+
+        terminal_examples = []
+        in_prog_examples = []
+
+        for example in training_result.model_examples:
+
+            game_state = example.labeled_example.pov_game_state.game_state
+
+            if is_one_move_from_terminal(game_state):
+                terminal_examples.append(example)
+            else:
+                in_prog_examples.append(example)
+
+        tb_writer.add_image(
+            f"training_examples/terminal",
+            render_model_example_image(random.sample(terminal_examples, k=20)),
+            global_step=i,
+            dataformats="HWC",
+        )
+
+        tb_writer.add_image(
+            f"training_examples/in_progress",
+            render_model_example_image(random.sample(in_prog_examples, k=20)),
+            global_step=i,
+            dataformats="HWC",
+        )
+
+
 def benchmark(
     i,
     tb_writer,
@@ -85,115 +160,74 @@ def benchmark(
     tactical_contexts: list[TacticalBenchmarkContext],
     match_contexts: list[MatchContext],
 ):
+    # TODO: formalize
+    value_benchmark_info = [(TIES_5X5, "ties"), (DECISIVE_5X5, "decisive")]
+
     # Model value benchmarks
     for vc in value_contexts:
 
-        results = []
+        for value_benchmarks, bench_description in value_benchmark_info:
 
-        for j, vb in enumerate(TIES_5X5):
+            results = []
 
-            results.extend(run_value_benchmark(vb, vc.model))
+            for vb in value_benchmarks:
+                results.extend(run_value_benchmark(vb, vc.model))
 
-        if make_visualizations:
-            viz = render_value_benchmark_image(results)
+            if make_visualizations:
 
-            tb_writer.add_image(
-                f"value_benchmarks/ties/{vc.description}",
-                viz,
-                global_step=i,
-                dataformats="HWC",
+                tb_writer.add_image(
+                    f"value_benchmarks/{bench_description}/{vc.description}",
+                    render_model_example_image(results),
+                    global_step=i,
+                    dataformats="HWC",
+                )
+
+            avg_diff = sum(
+                [abs(r.labeled_example.label - r.prediction) for r in results]
+            ) / len(results)
+
+            tb_writer.add_scalar(
+                f"Avg. Value Diff ({bench_description}) ({vc.description})", avg_diff, i
             )
 
-        avg_diff = sum(
-            [abs(r.expected_value - r.predicted_value) for r in results]
-        ) / len(results)
-
-        tb_writer.add_scalar(f"Avg. Value Diff (Ties) ({vc.description})", avg_diff, i)
-
-        results = []
-        for j, vb in enumerate(WINS_LOSSES_5X5):
-
-            results.extend(run_value_benchmark(vb, vc.model))
-
-        if make_visualizations:
-            viz = render_value_benchmark_image(results)
-
-            tb_writer.add_image(
-                f"value_benchmarks/wins_losses/{vc.description}",
-                viz,
-                global_step=i,
-                dataformats="HWC",
-            )
-
-        avg_diff = sum(
-            [abs(r.expected_value - r.predicted_value) for r in results]
-        ) / len(results)
-
-        tb_writer.add_scalar(f"Avg. Value Diff (WLs) ({vc.description})", avg_diff, i)
+    # TODO: formalize
+    tactical_benchmark_info = [
+        (SPATIAL_TACTICS_5X5, "spatial"),
+        (DECISIVE_TACTICS_5X5, "decisive"),
+    ]
 
     for tc in tactical_contexts:
-        # Tactical benchmarks
 
-        spatial_passes = spatial_fails = 0
+        for tactics, tactics_description in tactical_benchmark_info:
+            passes = fails = 0
 
-        results = []
+            results = []
 
-        for j, t in enumerate(SPATIAL_TACTICS_5X5):
+            for t in tactics:
 
-            results.extend(run_tactic(t, tc.dir_fn))
+                results.extend(run_tactic(t, tc.dir_fn))
 
-        for r in results:
+            for r in results:
 
-            if r.correct_moves == len(r.tactic.opposing_dirs):
-                spatial_passes += 1
-            else:
-                spatial_fails += 1
+                if r.correct_moves == len(r.tactic.opposing_dirs):
+                    passes += 1
+                else:
+                    fails += 1
 
-        if make_visualizations:
-            viz = render_tactic_benchmark_image(results)
-
-            tb_writer.add_image(
-                f"tactics/spatial/{tc.description}",
-                viz,
-                global_step=i,
-                dataformats="HWC",
+            tb_writer.add_scalar(
+                f"{tactics_description} tactics pass rate ({tc.description})",
+                passes / (passes + fails),
+                i,
             )
 
-        tb_writer.add_scalar(
-            f"Spatial Tactics Pass Rate ({tc.description})",
-            spatial_passes / (spatial_passes + spatial_fails),
-            i,
-        )
+            if make_visualizations:
 
-        decisive_passes = decisive_fails = 0
-        results = []
-
-        for j, t in enumerate(DECISIVE_TACTICS_5X5):
-
-            results.extend(run_tactic(t, tc.dir_fn))
-
-        for r in results:
-
-            if r.correct_moves == len(r.tactic.opposing_dirs):
-                decisive_passes += 1
-            else:
-                decisive_fails += 1
-
-        if make_visualizations:
-            viz = render_tactic_benchmark_image(results)
-
-            tb_writer.add_image(
-                f"tactics/decisive/{tc.description}",
-                viz,
-                global_step=i,
-                dataformats="HWC",
-            )
-
-        tb_writer.add_scalar(
-            f"Decisive Tactics Pass Rate ({tc.description})",
-            decisive_passes / (decisive_passes + decisive_fails),
-            i,
-        )
+                tb_writer.add_image(
+                    f"tactics/{tactics_description}/{tc.description}",
+                    render_tactic_benchmark_image(results),
+                    global_step=i,
+                    dataformats="HWC",
+                )
 
     # Match score
 
@@ -225,12 +259,12 @@ def main():
     # args = parser.parse_args()
 
     BATCH_SIZE = 4
-    PRE_TRAIN_EPOCHS = 0  # 50
-    PRE_TRAIN_KEEP_RATE = 0.0025  # 0.1
+    PRE_TRAIN_EPOCHS = 1_000_000  # 50
+    PRE_TRAIN_KEEP_RATE = 0.5  # 0.1
     KEEP_RATE = 0.5
-    LR = 0.002  # 0.01  # 0.001
+    LR = 0.001  # 0.01  # 0.001
 
-    STARTING_WEIGHTS = r"C:\Users\kylan\code\KOTron\tron-python\scripts\y2026\m05\old_runs\20260505-175141_quant_5x5_debug_v1\L0.001_B4\checkpoints\L0.001_B4_18245.pth"  # None
+    STARTING_WEIGHTS = None # r"C:\Users\kylan\code\KOTron\tron-python\scripts\y2026\m05\old_runs\20260505-175141_quant_5x5_debug_v1\L0.001_B4\checkpoints\L0.001_B4_18245.pth"  # None
 
     ACC_DIM = 128
 
@@ -244,14 +278,14 @@ def main():
 
     QUANT_SCALE = 256
 
-    RUN_DESCRIPTION = "quant_nnue_5x5_viz_testing"
+    RUN_DESCRIPTION = "quant_nnue_5x5_perfect_data"
 
     NUM_ROWS = NUM_COLS = 5
 
     # SIM_GAME_DEPTH = 2
     WIN_REWARD = 1.5
 
-    GAMES_PER_ITER = 16
+    GAMES_PER_ITER = 64
     CHECKPOINT_EVERY_N = 5
 
     P_NEUTRAL_START = 0.75
@@ -260,9 +294,9 @@ def main():
 
     TRAIN_ITERS = 100_000
 
-    PRETRAIN_PLAY_MATCH_EVERY_N = 2
+    PRETRAIN_PLAY_MATCH_EVERY_N = 1
     PLAY_MATCH_EVERY_N = 20
-    MAKE_VISUALIZATIONS_EVERY_N = 20
+    MAKE_VISUALIZATIONS_EVERY_N = 1
     N_MATCH_START_POSITIONS = 100
 
     ptkr_str = f"{PRE_TRAIN_KEEP_RATE:.4f}".replace(".", "p")
@@ -398,7 +432,7 @@ def main():
 
         datasets_dir = Path(tron.__file__).resolve().parent.parent / "datasets"
 
-        data_dir = datasets_dir / "20260505_5x5_random_depth2"
+        data_dir = datasets_dir / "20260511_5x5_perfect_play_all_starts_no_obstacles"
 
         games = []
 
@@ -437,25 +471,21 @@ def main():
 
             # game_data = from_proto(bin_data)
 
-            dataloader = make_dataloader(
+            dataloader = make_dataset(
                 games, batch_size=BATCH_SIZE, keep_rate=PRE_TRAIN_KEEP_RATE
             )
 
-            avg_loss, avg_pred_magnitude = train_loop(
+            training_result = train_loop(
                 model, dataloader, optimizer, criterion, epochs=1
             )
 
-            sos_dict, total_sos = get_sos_info(model)
-
-            print(f"{avg_loss=:.3f}, {avg_pred_magnitude=:.3f}, {total_sos=}")
-
-            # print("\nSum of squares (weights/biases):")
-            # for param, sos_val in sos_dict.items():
-            #     print(f"{param:40s} {sos_val}")
-
-            tb_writer.add_scalar("Weights Sum of Squares", total_sos, i)
-            tb_writer.add_scalar("Average Loss", avg_loss, i)
-            tb_writer.add_scalar("Average Prediction Magnitude", avg_pred_magnitude, i)
+            model_tensorboard_update(
+                i,
+                tb_writer,
+                model,
+                training_result,
+                make_visualizations=i % MAKE_VISUALIZATIONS_EVERY_N == 0,
+            )
 
             torch.save(
                 model.state_dict(),
@@ -582,14 +612,14 @@ def main():
         ]
 
         match_contexts = [
-            MatchContext(model_d1_tbc, random_bot_d1_tbc, match_starting_positions),
-            MatchContext(model_d3_tbc, random_bot_d3_tbc, match_starting_positions),
-            MatchContext(
-                quant_model_d1_tbc, random_bot_d1_tbc, match_starting_positions
-            ),
-            MatchContext(
-                quant_model_d3_tbc, random_bot_d3_tbc, match_starting_positions
-            ),
+            # MatchContext(model_d1_tbc, random_bot_d1_tbc, match_starting_positions),
+            # MatchContext(model_d3_tbc, random_bot_d3_tbc, match_starting_positions),
+            # MatchContext(
+            #     quant_model_d1_tbc, random_bot_d1_tbc, match_starting_positions
+            # ),
+            # MatchContext(
+            #     quant_model_d3_tbc, random_bot_d3_tbc, match_starting_positions
+            # ),
             # MatchContext(model_d1_bc, prev_model_d1_bc, match_starting_positions),
             # MatchContext(model_d3_bc, prev_model_d3_bc, match_starting_positions),
         ]
@@ -606,22 +636,17 @@ def main():
             match_contexts=match_contexts if i % PLAY_MATCH_EVERY_N == 0 else [],
         )
 
-        dataloader = make_dataloader(games, batch_size=BATCH_SIZE, keep_rate=KEEP_RATE)
+        dataset = make_dataset(games, batch_size=BATCH_SIZE, keep_rate=KEEP_RATE)
 
-        avg_loss, avg_pred_magnitude = train_loop(
-            model, dataloader, optimizer, criterion, epochs=1
+        training_result = train_loop(model, dataset, optimizer, criterion, epochs=1)
+
+        model_tensorboard_update(
+            i,
+            tb_writer,
+            model,
+            training_result,
+            make_visualizations=i % MAKE_VISUALIZATIONS_EVERY_N == 0,
         )
-
-        print(f"{avg_loss=:.3f}, {avg_pred_magnitude=:.3f}")
-
-        sos_dict, total_sos = get_sos_info(model)
-        print("\nSum of squares (weights/biases):")
-        for param, sos_val in sos_dict.items():
-            print(f"{param:40s} {sos_val}")
-
-        tb_writer.add_scalar("Weights Sum of Squares", total_sos, i)
-        tb_writer.add_scalar("Average Loss", avg_loss, i)
-        tb_writer.add_scalar("Average Prediction Magnitude", avg_pred_magnitude, i)
 
         if i % CHECKPOINT_EVERY_N == 0:
             torch.save(model.state_dict(), checkpoints_dir / f"{RUN_UID}_{i}.pth")

@@ -32,12 +32,13 @@ class TronModel(torch.nn.Module, ABC):
         )
 
 
+
+
 class RandomTronModel(TronModel):
     def get_model_input(self, pov_game_states: list[PovGameState]) -> torch.Tensor:
         raise NotImplementedError()
 
     def run_inference(self, pov_game_state: PovGameState) -> float:
-
 
         # Should be deterministic across Python process restarts in the same environment
         seed = hash(pov_game_state)
@@ -65,3 +66,11 @@ class RandomTronModel(TronModel):
     #     return int.from_bytes(digest[:8], byteorder="big", signed=False)
 
 
+# For searches that go all the way to the end of a game, so never should
+# be calling it's methods
+class DummyTronModel(TronModel):
+    def get_model_input(self, pov_game_states: list[PovGameState]) -> torch.Tensor:
+        raise RuntimeError("Can't train dummy model")
+
+    def run_inference(self, pov_game_state: PovGameState) -> float:
+        raise RuntimeError("Can't run inference on dummy model")
