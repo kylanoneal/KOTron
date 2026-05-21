@@ -79,9 +79,9 @@ def main():
     RUN_DESCRIPTION = "nnue_3x3_perfect_data_crossval"
     NUM_ROWS = NUM_COLS = 3
 
-    DATA_PATH = Path(
-        r"C:\Users\kylan\code\KOTron\tron-python\scripts\y2026\m05\perfect_data\3x3.pkl"
-    )
+    tron_dir = Path(tron.__file__).resolve().parent.parent
+    DATA_PATH = tron_dir / r"scripts\y2026\m05\perfect_data\3x3.pkl"
+    
     K_FOLDS = 4
     PRE_TRAIN_EPOCHS = 1_000_000  # 50
 
