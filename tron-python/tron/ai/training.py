@@ -88,7 +88,7 @@ def make_batches(
 
 
 def make_k_folds(
-    items: tuple[LabeledExample],
+    items: tuple[LabeledExample], # TODO: Fix this type hint once you decide on a struct here
     k: int,
     shuffle: bool = True,
     seed: int = 0,
@@ -159,13 +159,6 @@ def make_dataset(
             assert terminal_status.winner_index is not None
             assert 0 <= terminal_status.winner_index < 2
 
-        # TODO: "Think about how the first couple moves of the game should be represented"
-        # TODO: Add rotation augmentation
-
-        # game_progs = [
-        #     turn_index / (len(game_states) - 1)
-        #     for turn_index in range(len(game_states))
-        # ]
 
         # NOTE: Assumes 2 players
         for player_index in range(2):
@@ -177,7 +170,6 @@ def make_dataset(
             num_active_turns = len(game_states) - 1
             for i, game_state in enumerate(game_states[:-1]):
 
-                # for game_state, game_prog in zip(game_states, game_progs):
 
                 assert len(game_state.players) == 2
                 assert tron.get_status(game_state).status == GameStatus.IN_PROGRESS

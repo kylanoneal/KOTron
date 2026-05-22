@@ -34,15 +34,18 @@ from tron.ai import MCTS
 from tron.ai.MCTS import MctsContext
 
 from tron.ai.training import (
+    LabeledExample,
     TrainValSplit,
     train,
     validate,
+    get_label_magnitude,
     make_dataset,
     make_k_folds,
     make_batches,
 )
 
 from tron.ai.algos import choose_direction_basic_minimax
+from tron.ai.MINIMAX_THAT_BUILDS_ORACLE_INFO import OracleInfo, GameResult
 
 
 from tron.utils.sim_utils import get_start_position
@@ -63,6 +66,64 @@ class CrossValContext:
     train_val_split: TrainValSplit
 
 
+@dataclass(frozen=True)
+class OracleExample:
+    pov_game_state: PovGameState
+    oracle_info: OracleInfo
+
+
+def from_oracle_to_labeled_examples(
+    oracle_table: dict[GameState, OracleInfo], k_folds: int, seed=0
+):
+
+    h0_examples: list[LabeledExample] = []
+
+    for gs, oi in oracle_table.items():
+
+        if oi.result == GameResult.TIE:
+            label_mag = 0.0
+        else:
+            label_mag = get_label_magnitude(oi.steps_to_result)
+
+        h0_label = label_mag if oi.result == GameResult.P1_WIN else -label_mag
+
+        h0_examples.append(LabeledExample(PovGameState(gs, 0, 1), h0_label))
+
+    rng = random.Random(seed)
+
+    rng.shuffle(h0_examples)
+
+    # Build mirrored examples:
+
+    h1_examples = []
+    for h0_ex in h0_examples:
+
+        h1_examples.append(
+            LabeledExample(
+                PovGameState(h0_ex.pov_game_state.game_state, 1, 0), -h0_ex.label
+            )
+        )
+
+
+    h0_kfolds = make_k_folds(h0_examples, k_folds, shuffle=False)
+    h1_kfolds = make_k_folds(h1_examples, k_folds, shuffle=False)
+
+    # Build combined kfolds:
+
+    combined_kfolds = []
+
+    for h0_kfold, h1_kfold in zip(h0_kfolds, h1_kfolds):
+
+        combined_kfolds.append(
+            TrainValSplit(
+                train_examples=h0_kfold.train_examples + h1_kfold.train_examples,
+                val_examples=h0_kfold.val_examples + h1_kfold.val_examples,
+            )
+        )
+
+    return combined_kfolds
+
+
 def main():
 
     parser = argparse.ArgumentParser()
@@ -81,12 +142,12 @@ def main():
     NUM_ROWS = NUM_COLS = 3
 
     tron_dir = Path(tron.__file__).resolve().parent.parent
-    DATA_PATH = tron_dir / r"scripts\y2026\m05\perfect_data\3x3.pkl"
+    DATA_PATH = tron_dir / r"scripts\y2026\m05\perfect_data_oracle\3x3.pkl"
 
     K_FOLDS = 4
     PRE_TRAIN_EPOCHS = 1_000_000  # 50
 
-    MAKE_VISUALIZATIONS_EVERY_N = 5
+    MAKE_VISUALIZATIONS_EVERY_N = 200
 
     RUN_UID = f"L{LR}_B{BATCH_SIZE}_ACCDIM{ACC_DIM}"
 
@@ -133,9 +194,9 @@ def main():
     ############################################
 
     with DATA_PATH.open("rb") as f:
-        flat_dataset = pickle.load(f)
+        oracle_table = pickle.load(f)
 
-    cross_val_splits = make_k_folds(flat_dataset, k=K_FOLDS, shuffle=True, seed=0)
+    cross_val_splits = from_oracle_to_labeled_examples(oracle_table, K_FOLDS, seed=0)
 
     cross_val_contexts: list[CrossValContext] = []
 
@@ -207,11 +268,9 @@ def main():
                 checkpoints_dir / f"{RUN_UID}_epoch{i}_cvsplit{j}.pth",
             )
 
-
             cum_epoch_train_loss += training_result.avg_loss
             cum_epoch_val_loss += avg_validation_loss
 
-        
         tb_writer.add_scalar(f"aggregate_train_loss", cum_epoch_train_loss / K_FOLDS, i)
         tb_writer.add_scalar(f"aggregate_val_loss", cum_epoch_val_loss / K_FOLDS, i)
 
