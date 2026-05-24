@@ -10,22 +10,39 @@ from tron.game import GameState, PovGameState, get_wall_indices
 class NnueTronModel(TronModel):
     def __init__(self, num_rows: int, num_cols: int, acc_dim: int):
         super().__init__()
-        # Embedding table: feature → acc_dim vector
-        self.embedding = nn.Embedding(num_rows * num_cols * 3, acc_dim)
+
+        self.num_rows = num_rows
+        self.num_cols = num_cols
+        self.num_cells = num_rows * num_cols
+
+        # One padding idx
+        num_features = (self.num_cells * 3) + 1
+
+        self.padding_idx = num_features - 1
+
+        # Can only be num cells plus 2 (all walls filled and 2 players)
+        self.max_features = self.num_cells + 2
+
+        # EmbeddingBag directly sums variable-length feature sets.
+        self.embedding = nn.EmbeddingBag(
+            num_embeddings=num_features,
+            embedding_dim=acc_dim,
+            padding_idx=self.padding_idx,
+            mode="sum",
+        )
         # Tiny MLP on top of the accumulator
         self.fc1 = nn.Linear(acc_dim, 8)
         self.fc2 = nn.Linear(8, 16)
         self.fc_value = nn.Linear(16, 1)
 
-        self.num_rows = num_rows
-        self.num_cols = num_cols
-        self.num_cells = num_rows * num_cols
 
     def initialize_acc(self, pov_game_state: PovGameState):
         """
         Build accumulator from scratch by summing embeddings
 
         """
+
+        raise NotImplementedError("Does this ever need to happen?")
         active_indices = torch.tensor(
             self.get_active_indices(pov_game_state), dtype=torch.long
         )
@@ -33,23 +50,12 @@ class NnueTronModel(TronModel):
 
         return acc
 
-    def update_acc(self, acc, to_remove, to_add):
-        """
-        Efficient delta‐update:
-          acc ← acc - E[to_remove] + E[to_add]
-        to_remove, to_add: single indices or lists of indices
-        """
-        # wrap into LongTensor
-        rem = torch.tensor(to_remove, dtype=torch.long)
-        add = torch.tensor(to_add, dtype=torch.long)
 
-        emb_rem = self.embedding(rem).sum(dim=0)
-        emb_add = self.embedding(add).sum(dim=0)
-        return acc - emb_rem + emb_add
+    def forward(self, indices: torch.Tensor) -> torch.Tensor:
 
-    def forward(self, acc):
-        # 3. Clamp and run MLP
-        # x = torch.clamp(acc, min=0.0, max=127.0)  # mimic 8-bit clamp
+
+        # Shape: [batch_size, acc_dim]
+        acc = self.embedding(indices)
 
         x = torch.clamp(acc, min=0.0, max=1.0)
 
@@ -94,22 +100,37 @@ class NnueTronModel(TronModel):
 
         return indices
 
-    def get_model_input(self, pov_game_states: list[PovGameState]) -> torch.Tensor:
+    def get_model_input(self, pov_game_states: list[PovGameState]) -> tuple:
 
-        accs = []
+        inputs: list[int] = []
 
         for pov_game_state in pov_game_states:
+            curr_active_indices = self.get_active_indices(pov_game_state)
+            curr_pad_indices = [self.padding_idx] * (self.max_features - len(curr_active_indices))
 
-            accs.append(self.initialize_acc(pov_game_state))
+            input = curr_active_indices + curr_pad_indices
 
-        return torch.stack(accs)
+            assert len(input) == self.max_features
+
+            torch_input = torch.tensor(input, dtype=torch.long)
+
+            inputs.append(torch_input)
+
+
+        return torch.stack(inputs)
 
     def run_inference(self, pov_game_state: PovGameState) -> float:
 
+
+        self.eval()
+
         with torch.no_grad():
-            acc = self.initialize_acc(pov_game_state)
-            output = self(acc)
-            return output.item()
+
+            model_input = self.get_model_input([pov_game_state])
+
+            output = self(model_input)
+
+            return output.detach().item()
 
 
 # TODO: Figure out most efficient dtypes to use
@@ -118,17 +139,23 @@ class QuantizedNnueTronModel(TronModel):
     def __init__(self, model: NnueTronModel, scale=256):
 
         assert isinstance(model, NnueTronModel)
-        raise NotImplementedError("We have more than 2 layers now")
+        raise NotImplementedError("We have more than 2 layers now and using embedding bag")
 
         super().__init__()
         self.raw_model = model
 
         self.scale = scale
 
-        self.embed_weights = torch.round(model.embedding.weight * scale).to(dtype=torch.int64)
+        self.embed_weights = torch.round(model.embedding.weight * scale).to(
+            dtype=torch.int64
+        )
 
-        self.linear_weights = torch.round(model.fc1.weight * scale).to(dtype=torch.int64)
-        self.linear_bias = torch.round(model.fc1.bias * scale * scale).to(dtype=torch.int64)
+        self.linear_weights = torch.round(model.fc1.weight * scale).to(
+            dtype=torch.int64
+        )
+        self.linear_bias = torch.round(model.fc1.bias * scale * scale).to(
+            dtype=torch.int64
+        )
 
         assert self.embed_weights.dtype == torch.int64
         assert self.linear_weights.dtype == torch.int64
@@ -143,7 +170,7 @@ class QuantizedNnueTronModel(TronModel):
 
         # 3. Linear layer in integer domain
         #    (1 x acc_dim) @ (acc_dim) -> scalar
-        y_int = (self.linear_weights @ acc) + self.linear_bias 
+        y_int = (self.linear_weights @ acc) + self.linear_bias
 
         # print(f"After linear: {y_int.sum().item()/ 1024 / 1024=}")
 
@@ -158,13 +185,13 @@ class QuantizedNnueTronModel(TronModel):
         # 1. Sum embeddings (int accumulator)
         acc = self.embed_weights[indices].sum(dim=0)  # [acc_dim], int64
 
-
         assert acc.dtype == torch.int64
 
         return acc
 
     def run_inference(self, pov_game_state: PovGameState) -> float:
 
+        raise NotImplementedError("Changed how running inference on NNUE's work, rethink this")
         acc = self.initialize_acc(pov_game_state)
 
         return self.run_inference_acc(acc)
@@ -188,7 +215,6 @@ class QuantizedNnueTronModel(TronModel):
 
         new_hero = next_game_state.players[hero_index]
         new_oppo = next_game_state.players[opponent_index]
-
 
         # NOTE: will double count a wall if the player is inactive
         assert len(next_pov_game_state.game_state.players) == 2

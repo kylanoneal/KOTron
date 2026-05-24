@@ -223,67 +223,124 @@ def make_dataset(
     return tuple(dataset)
 
 
+# def train(
+#     model: TronModel,
+#     dataset: tuple[tuple[LabeledExample]],
+#     optimizer,
+#     criterion,
+#     device=torch.device("cpu"),
+#     epochs=1,
+# ):
+
+#     model.train()
+
+#     # TODO: Instead of computing stats like avg_loss in train loop, just
+#     # provide per example loss (for example) and let something else handle
+#     # the stats
+
+#     cum_loss = 0.0
+#     cum_magnitude = 0.0
+
+#     model_examples: tuple[tuple[ModelExample]] = []
+
+#     # Iterate through the DataLoader in a training loop
+#     for epoch in range(epochs):
+
+#         cum_epoch_loss = 0.0
+#         cum_epoch_magnitude = 0.0
+
+#         for batch in dataset:
+
+#             inputs = model.get_model_input([ex.pov_game_state for ex in batch])
+#             labels = torch.tensor([ex.label for ex in batch])
+
+#             if device.type == "cuda":
+#                 # Move data to GPU if available
+
+#                 inputs = inputs.to(device)
+#                 labels = labels.to(device)
+
+#             # if np.random.random() < 0.01:
+#             #     print(f"Mean labels: {labels.mean()}")
+#             #     print(f"mean Abs labels: {labels.abs().mean()}\n")
+
+#             optimizer.zero_grad()
+
+#             # Forward pass, loss computation, backward pass, optimizer step, etc.
+#             outputs = model(inputs)
+
+#             for train_example, o in zip(batch, outputs):
+
+#                 model_examples.append(ModelExample(train_example, o.item()))
+
+#             cum_epoch_magnitude += torch.sum(torch.abs(outputs)).item() / len(outputs)
+
+#             loss = criterion(outputs, labels)
+
+#             loss.backward()
+#             optimizer.step()
+
+#             cum_epoch_loss += loss.item()
+
+#         epoch_avg_loss = cum_epoch_loss / len(dataset)
+#         epoch_avg_magnitude = cum_epoch_magnitude / len(dataset)
+
+#         cum_loss += epoch_avg_loss
+#         cum_magnitude += epoch_avg_magnitude
+
+#     average_loss = cum_loss / epochs
+#     average_magnitude = cum_magnitude / epochs
+
+#     return TrainingResult(
+#         model_examples,
+#         avg_loss=average_loss,
+#         avg_prediction_magnitude=average_magnitude,
+#     )
+
 def train(
     model: TronModel,
-    dataset: tuple[tuple[LabeledExample]],
+    train_loader: DataLoader,
     optimizer,
     criterion,
-    device=torch.device("cpu"),
-    epochs=1,
-):
-
+    epochs: int = 1,
+) -> TrainingResult:
     model.train()
-
-    # TODO: Instead of computing stats like avg_loss in train loop, just
-    # provide per example loss (for example) and let something else handle
-    # the stats
 
     cum_loss = 0.0
     cum_magnitude = 0.0
 
-    model_examples: tuple[tuple[ModelExample]] = []
+    # Important: if your DataLoader only gives tensors, you no longer have
+    # the original LabeledExample objects available here.
+    model_examples: list[ModelExample] = []
 
-    # Iterate through the DataLoader in a training loop
     for epoch in range(epochs):
-
         cum_epoch_loss = 0.0
         cum_epoch_magnitude = 0.0
+        num_epoch_examples = 0
 
-        for batch in dataset:
+        for inputs, labels in train_loader:
 
-            inputs = model.get_model_input([ex.pov_game_state for ex in batch])
-            labels = torch.tensor([ex.label for ex in batch])
-
-            if device.type == "cuda":
-                # Move data to GPU if available
-
-                inputs = inputs.to(device)
-                labels = labels.to(device)
-
-            # if np.random.random() < 0.01:
-            #     print(f"Mean labels: {labels.mean()}")
-            #     print(f"mean Abs labels: {labels.abs().mean()}\n")
+            batch_size = inputs.shape[0]
 
             optimizer.zero_grad()
 
-            # Forward pass, loss computation, backward pass, optimizer step, etc.
             outputs = model(inputs)
-
-            for train_example, o in zip(batch, outputs):
-
-                model_examples.append(ModelExample(train_example, o.item()))
-
-            cum_epoch_magnitude += torch.sum(torch.abs(outputs)).item() / len(outputs)
 
             loss = criterion(outputs, labels)
 
             loss.backward()
             optimizer.step()
 
-            cum_epoch_loss += loss.item()
+            # If criterion returns mean batch loss, multiply by batch_size
+            # so the final average is truly per-example.
+            cum_epoch_loss += loss.item() * batch_size
 
-        epoch_avg_loss = cum_epoch_loss / len(dataset)
-        epoch_avg_magnitude = cum_epoch_magnitude / len(dataset)
+            cum_epoch_magnitude += torch.sum(torch.abs(outputs)).item()
+
+            num_epoch_examples += batch_size
+
+        epoch_avg_loss = cum_epoch_loss / num_epoch_examples
+        epoch_avg_magnitude = cum_epoch_magnitude / num_epoch_examples
 
         cum_loss += epoch_avg_loss
         cum_magnitude += epoch_avg_magnitude
@@ -292,38 +349,34 @@ def train(
     average_magnitude = cum_magnitude / epochs
 
     return TrainingResult(
-        model_examples,
+        tuple(model_examples),
         avg_loss=average_loss,
         avg_prediction_magnitude=average_magnitude,
     )
 
-
 def validate(
     model: TronModel,
-    validation_set: tuple[LabeledExample, ...],
+    validation_loader: DataLoader,
     criterion,
-    device=torch.device("cpu"),
 ) -> float:
-    
-    
     model.eval()
 
     cum_loss = 0.0
+    num_examples = 0
 
     with torch.no_grad():
-        for ex in validation_set:
-            inputs = model.get_model_input([ex.pov_game_state])
-            labels = torch.tensor([ex.label])
-
-            if device.type == "cuda":
-                inputs = inputs.to(device)
-                labels = labels.to(device)
+        for inputs, labels in validation_loader:
 
             outputs = model(inputs)
-
             loss = criterion(outputs, labels)
-            cum_loss += loss.item()
 
-    avg_loss = cum_loss / len(validation_set)
+            batch_size = inputs.shape[0]
+
+            # If criterion returns mean loss over the batch, scale back up
+            # so the final average is per-example.
+            cum_loss += loss.item() * batch_size
+            num_examples += batch_size
+
+    avg_loss = cum_loss / num_examples
 
     return avg_loss
