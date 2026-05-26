@@ -27,10 +27,11 @@ from tron.ai.training import (
 
 
 from tron.ai.benchmarks import (
-    SPATIAL_TACTICS_5X5,
-    DECISIVE_TACTICS_5X5,
-    TIES_5X5,
-    DECISIVE_5X5,
+    Tactic,
+    # SPATIAL_TACTICS_5X5,
+    # DECISIVE_TACTICS_5X5,
+    # TIES_5X5,
+    # DECISIVE_5X5,
     match,
     run_tactic,
     run_value_benchmark,
@@ -48,6 +49,11 @@ class ValueBenchmarkContext:
 @dataclass
 class TacticalBenchmarkContext:
     dir_fn: Callable[[PovGameState], Direction]
+    description: str
+
+@dataclass
+class TacticGroup:
+    tactics: list[Tactic]
     description: str
 
 
@@ -140,51 +146,49 @@ def benchmark(
     value_contexts: list[ValueBenchmarkContext],
     tactical_contexts: list[TacticalBenchmarkContext],
     match_contexts: list[MatchContext],
+    tactic_groups: list[TacticGroup]
 ):
-    # TODO: formalize
-    value_benchmark_info = [(TIES_5X5, "ties"), (DECISIVE_5X5, "decisive")]
+    # # TODO: formalize
+    # value_benchmark_info = [(TIES_5X5, "ties"), (DECISIVE_5X5, "decisive")]
 
-    # Model value benchmarks
-    for vc in value_contexts:
+    # # Model value benchmarks
+    # for vc in value_contexts:
 
-        for value_benchmarks, bench_description in value_benchmark_info:
+    #     for value_benchmarks, bench_description in value_benchmark_info:
 
-            results = []
+    #         results = []
 
-            for vb in value_benchmarks:
-                results.extend(run_value_benchmark(vb, vc.model))
+    #         for vb in value_benchmarks:
+    #             results.extend(run_value_benchmark(vb, vc.model))
 
-            if make_visualizations:
+    #         if make_visualizations:
 
-                tb_writer.add_image(
-                    f"value_benchmarks/{bench_description}/{vc.description}",
-                    render_model_example_image(results),
-                    global_step=i,
-                    dataformats="HWC",
-                )
+    #             tb_writer.add_image(
+    #                 f"value_benchmarks/{bench_description}/{vc.description}",
+    #                 render_model_example_image(results),
+    #                 global_step=i,
+    #                 dataformats="HWC",
+    #             )
 
-            avg_diff = sum(
-                [abs(r.labeled_example.label - r.prediction) for r in results]
-            ) / len(results)
+    #         avg_diff = sum(
+    #             [abs(r.labeled_example.label - r.prediction) for r in results]
+    #         ) / len(results)
 
-            tb_writer.add_scalar(
-                f"Avg. Value Diff ({bench_description}) ({vc.description})", avg_diff, i
-            )
+    #         tb_writer.add_scalar(
+    #             f"Avg. Value Diff ({bench_description}) ({vc.description})", avg_diff, i
+    #         )
 
-    # TODO: formalize
-    tactical_benchmark_info = [
-        (SPATIAL_TACTICS_5X5, "spatial"),
-        (DECISIVE_TACTICS_5X5, "decisive"),
-    ]
 
     for tc in tactical_contexts:
 
-        for tactics, tactics_description in tactical_benchmark_info:
+        for tactic_group in tactic_groups:
+
+
             passes = fails = 0
 
             results = []
 
-            for t in tactics:
+            for t in tactic_group.tactics:
 
                 results.extend(run_tactic(t, tc.dir_fn))
 
@@ -196,7 +200,7 @@ def benchmark(
                     fails += 1
 
             tb_writer.add_scalar(
-                f"{tactics_description} tactics pass rate ({tc.description})",
+                f"{tactic_group.description} tactics pass rate ({tc.description})",
                 passes / (passes + fails),
                 i,
             )
@@ -204,7 +208,7 @@ def benchmark(
             if make_visualizations:
 
                 tb_writer.add_image(
-                    f"tactics/{tactics_description}/{tc.description}",
+                    f"tactics/{tactic_group.description}/{tc.description}",
                     render_tactic_benchmark_image(results),
                     global_step=i,
                     dataformats="HWC",
@@ -212,16 +216,16 @@ def benchmark(
 
     # Match score
 
-    for mc in match_contexts:
+    # for mc in match_contexts:
 
-        p1_wins, p2_wins, ties = match(
-            mc.p1_bc.dir_fn, mc.p2_bc.dir_fn, mc.starting_positions
-        )
+    #     p1_wins, p2_wins, ties = match(
+    #         mc.p1_bc.dir_fn, mc.p2_bc.dir_fn, mc.starting_positions
+    #     )
 
-        p1_match_score = (p1_wins + ties * 0.5) / (p1_wins + p2_wins + ties)
+    #     p1_match_score = (p1_wins + ties * 0.5) / (p1_wins + p2_wins + ties)
 
-        tb_writer.add_scalar(
-            f"{mc.p1_bc.description} match score vs. {mc.p2_bc.description})",
-            p1_match_score,
-            i,
-        )
+    #     tb_writer.add_scalar(
+    #         f"{mc.p1_bc.description} match score vs. {mc.p2_bc.description})",
+    #         p1_match_score,
+    #         i,
+    #     )

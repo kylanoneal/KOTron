@@ -8,16 +8,29 @@ from tron.game import GameState, PovGameState, get_wall_indices
 
 # --- 2. Define the efficient‐updatable net ---
 class NnueTronModel(TronModel):
-    def __init__(self, num_rows: int, num_cols: int, acc_dim: int):
+    def __init__(
+        self,
+        num_rows: int,
+        num_cols: int,
+        acc_dim: int,
+        fc_layer_neuron_counts:tuple, # (8, 16),
+        clamp_val: float #= 1.0,
+    ):
         super().__init__()
 
         self.num_rows = num_rows
         self.num_cols = num_cols
         self.num_cells = num_rows * num_cols
 
-        # One padding idx
-        num_features = (self.num_cells * 3) + 1
+        self.clamp_val = clamp_val
 
+        # Real features:
+        #   [0, num_cells)              -> walls
+        #   [num_cells, 2*num_cells)    -> hero head
+        #   [2*num_cells, 3*num_cells)  -> opponent head
+        #
+        # Plus one padding feature.
+        num_features = (self.num_cells * 3) + 1
         self.padding_idx = num_features - 1
 
         # Can only be num cells plus 2 (all walls filled and 2 players)
@@ -31,10 +44,31 @@ class NnueTronModel(TronModel):
             mode="sum",
         )
         # Tiny MLP on top of the accumulator
-        self.fc1 = nn.Linear(acc_dim, 8)
-        self.fc2 = nn.Linear(8, 16)
-        self.fc_value = nn.Linear(16, 1)
 
+        self.fc_layers = nn.ModuleList()
+
+        prev_neuron_count = acc_dim
+        for neuron_count in fc_layer_neuron_counts:
+            self.fc_layers.append(nn.Linear(prev_neuron_count, neuron_count))
+            prev_neuron_count = neuron_count
+
+        self.fc_value = nn.Linear(prev_neuron_count, 1)
+
+    def forward(self, indices: torch.Tensor) -> torch.Tensor:
+
+        # indices shape: [batch_size, max_features]
+        # x shape: [batch_size, acc_dim]
+        x = self.embedding(indices)
+        x = torch.clamp(x, min=0.0, max=self.clamp_val)
+
+        for layer in self.fc_layers:
+
+            x = layer(x)
+            x = torch.clamp(x, min=0.0, max=self.clamp_val)
+
+        out = self.fc_value(x)
+
+        return out.squeeze(-1)
 
     def initialize_acc(self, pov_game_state: PovGameState):
         """
@@ -49,25 +83,6 @@ class NnueTronModel(TronModel):
         acc = self.embedding(active_indices).sum(dim=0)
 
         return acc
-
-
-    def forward(self, indices: torch.Tensor) -> torch.Tensor:
-
-
-        # Shape: [batch_size, acc_dim]
-        acc = self.embedding(indices)
-
-        x = torch.clamp(acc, min=0.0, max=1.0)
-
-        x = self.fc1(x)
-        x = torch.clamp(x, min=0.0, max=1.0)
-
-        x = self.fc2(x)
-        x = torch.clamp(x, min=0.0, max=1.0)
-
-        out = self.fc_value(x)
-
-        return out.squeeze(-1)
 
     def emb_idx_wall(self, idx):
         return idx
@@ -106,7 +121,9 @@ class NnueTronModel(TronModel):
 
         for pov_game_state in pov_game_states:
             curr_active_indices = self.get_active_indices(pov_game_state)
-            curr_pad_indices = [self.padding_idx] * (self.max_features - len(curr_active_indices))
+            curr_pad_indices = [self.padding_idx] * (
+                self.max_features - len(curr_active_indices)
+            )
 
             input = curr_active_indices + curr_pad_indices
 
@@ -116,11 +133,9 @@ class NnueTronModel(TronModel):
 
             inputs.append(torch_input)
 
-
         return torch.stack(inputs)
 
     def run_inference(self, pov_game_state: PovGameState) -> float:
-
 
         self.eval()
 
@@ -139,7 +154,9 @@ class QuantizedNnueTronModel(TronModel):
     def __init__(self, model: NnueTronModel, scale=256):
 
         assert isinstance(model, NnueTronModel)
-        raise NotImplementedError("We have more than 2 layers now and using embedding bag")
+        raise NotImplementedError(
+            "We have more than 2 layers now and using embedding bag"
+        )
 
         super().__init__()
         self.raw_model = model
@@ -191,7 +208,9 @@ class QuantizedNnueTronModel(TronModel):
 
     def run_inference(self, pov_game_state: PovGameState) -> float:
 
-        raise NotImplementedError("Changed how running inference on NNUE's work, rethink this")
+        raise NotImplementedError(
+            "Changed how running inference on NNUE's work, rethink this"
+        )
         acc = self.initialize_acc(pov_game_state)
 
         return self.run_inference_acc(acc)

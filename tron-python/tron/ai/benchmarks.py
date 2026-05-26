@@ -39,6 +39,11 @@ class Tactic:
     opposing_dirs: list[Direction]
     expected_hero_dirs: Optional[list[Direction]] = None
 
+
+    def __post_init__(self):
+        assert len(self.opposing_dirs) > 0
+
+
     @staticmethod
     def transform(bench: "Tactic", do_lr_flip: bool, n_rot_90: int) -> "Tactic":
 

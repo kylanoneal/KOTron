@@ -13,7 +13,7 @@ def main():
     out_dir.mkdir(exist_ok=True)
 
 
-    for i in range(3, 5):
+    for i in range(3, 4):
 
         oracle_table = label_every_gamestate(i)
 
