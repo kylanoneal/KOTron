@@ -164,6 +164,20 @@ def from_oracle_to_tensor_train_val_split(
 
 def main():
 
+
+    RUN_DESCRIPTION = "nnue_3x3_grid_search"
+
+    current_script_path = Path(__file__).resolve()
+
+    outer_run_dir = current_script_path.parent / "runs"
+    outer_run_dir.mkdir(exist_ok=True)
+
+    run_dir = (
+        outer_run_dir
+        / f"{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}_{RUN_DESCRIPTION}"
+    )
+    run_dir.mkdir(exist_ok=True)
+
     LRS = [0.001]
     B_SIZES = [16, 32]
     ACC_DIMS = [256]
@@ -191,10 +205,10 @@ def main():
         param_combos,
         desc="Training configs",
     ):
-        grid_search(lr, batch_size, acc_dim, clamp_val, fc_neurons)
+        grid_search(run_dir, lr, batch_size, acc_dim, clamp_val, fc_neurons)
 
 
-def grid_search(_lr, _bs, _adim, _cval, _fcns):
+def grid_search(run_dir: Path, _lr, _bs, _adim, _cval, _fcns):
 
     LR = _lr
     BATCH_SIZE = _bs
@@ -205,7 +219,6 @@ def grid_search(_lr, _bs, _adim, _cval, _fcns):
     MIN_DELTA = 0.0001
     PATIENCE = 50
 
-    RUN_DESCRIPTION = "nnue_3x3_grid_search"
     NUM_ROWS = NUM_COLS = 3
 
     tron_dir = Path(tron.__file__).resolve().parent.parent
@@ -232,28 +245,8 @@ def grid_search(_lr, _bs, _adim, _cval, _fcns):
     # TENSORBOARD AND MODEL CHECKPOINT SETUP
     ############################################
 
-    current_script_path = Path(__file__).resolve()
-
-    outer_run_dir = current_script_path.parent / "runs"
-    outer_run_dir.mkdir(exist_ok=True)
-
-    run_dir = (
-        outer_run_dir
-        / f"{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}_{RUN_DESCRIPTION}"
-    )
-    run_dir.mkdir(exist_ok=True)
-
     uid_run_dir = run_dir / RUN_UID
     uid_run_dir.mkdir(exist_ok=False)
-
-    data_out_dir = uid_run_dir / "game_data"
-    data_out_dir.mkdir()
-
-    checkpoints_dir = uid_run_dir / "checkpoints"
-    checkpoints_dir.mkdir()
-
-    backup_path = uid_run_dir / f"{current_script_path.name.split('.')[0]}.bak.py"
-    shutil.copy2(current_script_path, backup_path)
 
     tb_writer = SummaryWriter(log_dir=uid_run_dir)
 
@@ -267,7 +260,9 @@ def grid_search(_lr, _bs, _adim, _cval, _fcns):
         acc_dim=ACC_DIM,
         fc_layer_neuron_counts=FC_NEURONS,
         clamp_val=CLAMP_VAL,
-    )
+    ).to(DEVICE)
+
+
     criterion = torch.nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), amsgrad=True, lr=LR)
 
@@ -381,7 +376,7 @@ def grid_search(_lr, _bs, _adim, _cval, _fcns):
 
     torch.save(
         best_state_dict,
-        run_dir / f"valloss{best_val_loss}_{RUN_UID}_best_epoch{i}.pth",
+        run_dir / f"valloss{round(best_val_loss, 3)}_{RUN_UID}_best_epoch{i}.pth",
     )
 
 
