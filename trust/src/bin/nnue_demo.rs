@@ -5,9 +5,9 @@ use std::time::Instant;
 use trust::tron;
 
 use trust::{
-    minimax::{minimax_alpha_beta_eval_all, MinimaxContext, MinimaxResult},
-    models::TractModel,
-    tron::{Direction, GameState, GameStatus, Player, StatusInfo},
+    alphabeta::{alphabeta, MinimaxContext, MinimaxResult},
+    nnue::QuantizedNnue,
+    tron::{Direction, GameStatus, Player, StatusInfo},
 };
 
 fn main() {
@@ -19,22 +19,31 @@ fn main() {
 }
 
 fn run_sims() -> Result<()> {
+    let nnue_model =
+        QuantizedNnue::load(r#"C:\Users\kylan\code\KOTron\tron-python\models\3x3.npz"#)?;
+
+    println!("Loaded model:");
+    println!("  scale: {}", nnue_model.scale);
+    println!("  padding_idx: {}", nnue_model.padding_idx);
+    println!("  num_features: {}", nnue_model.num_features());
+    println!("  acc_dim: {}", nnue_model.acc_dim());
+    println!("  num_fc_layers: {}", nnue_model.num_fc_layers());
+
+    // Example:
+    // let pov_game_state = ...;
+    // let eval = nnue_model.run_inference(&pov_game_state)?;
+
     let p1 = Player {
-        row: 2,
-        col: 2,
+        row: 0,
+        col: 0,
         can_move: true,
     };
 
     let p2 = Player {
-        row: 7,
-        col: 7,
+        row: 2,
+        col: 2,
         can_move: true,
     };
-
-
-
-    let tract_model: TractModel =
-        TractModel::new("tron_model_v2.onnx").expect("failed to init tract model.");
 
     println!("starting sims");
     let n_games = 100;
@@ -45,38 +54,37 @@ fn run_sims() -> Result<()> {
     let mut ties = 0;
 
     for i in 0..n_games {
-
         let start_players: Vector<Player> = vector![p1, p2];
-        let mut curr_game = tron::new_game(start_players, 10, 10);
+        let mut curr_game = tron::new_game(start_players, 3, 3);
 
         let mut curr_status: StatusInfo = tron::get_status(&curr_game);
 
         while curr_status.status == GameStatus::InProgress {
             // bot chooses player directions
 
-            let p1_mm_result: MinimaxResult = minimax_alpha_beta_eval_all(
+            let p1_mm_result: MinimaxResult = alphabeta(
                 &curr_game,
-                4,
+                1,
                 true,
                 f32::NEG_INFINITY,
                 f32::INFINITY,
                 None,
                 &MinimaxContext {
-                    model: &tract_model,
+                    model: &nnue_model,
                     maximizing_player: 0,
                     minimizing_player: 1,
                 },
             );
 
-            let p2_mm_result: MinimaxResult = minimax_alpha_beta_eval_all(
+            let p2_mm_result: MinimaxResult = alphabeta(
                 &curr_game,
-                4,
+                1,
                 true,
                 f32::NEG_INFINITY,
                 f32::INFINITY,
                 None,
                 &MinimaxContext {
-                    model: &tract_model,
+                    model: &nnue_model,
                     maximizing_player: 1,
                     minimizing_player: 0,
                 },

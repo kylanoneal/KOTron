@@ -3,7 +3,6 @@
 // use std::time::Instant;
 // use tract_onnx::prelude::*;
 
-
 // use trust::{
 //     algos::{choose_direction_model_naive, choose_direction_random},
 //     tron::{Direction, DirectionUpdate, GameState, GameStatus, Player},
@@ -11,7 +10,6 @@
 // };
 
 fn main() {
-
     println!("bruh");
 
     // let start = Instant::now();
@@ -41,7 +39,6 @@ fn main() {
 //     let start_game: GameState = GameState::new(players, 10, 10);
 
 //     let mut curr_game: GameState = start_game.clone();
-
 
 //     let tract_model: TractModel =
 //         TractModel::new("tron_model_v2.onnx").expect("failed to init tract model.");

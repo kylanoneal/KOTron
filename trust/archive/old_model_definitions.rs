@@ -1,100 +1,86 @@
-use std::io::Cursor;
+// Contains definitions for Tract model , Ort model and TorchScript model
 
-use crate::tron::GameState;
 
-use ndarray::Array4;
-use ndarray::ArrayViewD;
+// #[derive(Debug)]
+// pub struct TractModel {
+//     model: SimplePlan<TypedFact, Box<dyn TypedOp>, Graph<TypedFact, Box<dyn TypedOp>>>,
+// }
 
-use tract_onnx::prelude::*;
-// use ort::session::Session;
-// use tch::{CModule, Cuda, Device, IndexOp, Kind, Tensor};
+// impl TractModel {
+//     pub fn new(model_path: &str) -> Result<Self> {
+//         // Get CUDA working
 
-use anyhow::Result;
+//         let model: SimplePlan<TypedFact, Box<dyn TypedOp>, Graph<TypedFact, Box<dyn TypedOp>>> =
+//             tract_onnx::onnx()
+//                 .model_for_path(model_path)?
+//                 .into_optimized()?
+//                 .into_runnable()?;
 
-pub trait Model {
-    fn run_inference(&self, game_states: &Vec<&GameState>, player_index: usize) -> Result<Vec<f32>>;
-}
+//         Ok(Self { model })
+//     }
 
-#[derive(Debug)]
-pub struct TractModel {
-    model: SimplePlan<TypedFact, Box<dyn TypedOp>, Graph<TypedFact, Box<dyn TypedOp>>>,
-}
+//     pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
+//         // Wrap the byte slice in a Cursor to implement `Read`
+//         let mut reader: Cursor<&[u8]> = Cursor::new(bytes);
+//         // Load the model from the provided byte slice
+//         let model = tract_onnx::onnx()
+//             .model_for_read(&mut reader)?
+//             .into_optimized()?
+//             .into_runnable()?;
+//         Ok(Self { model })
+//     }
+// }
 
-impl TractModel {
-    pub fn new(model_path: &str) -> Result<Self> {
-        // Get CUDA working
+// impl Model for TractModel {
+//     fn run_inference(&self, game_states: &Vec<&GameState>, player_index: usize) -> Result<Vec<f32>> {
+//         // Example input tensor
 
-        let model: SimplePlan<TypedFact, Box<dyn TypedOp>, Graph<TypedFact, Box<dyn TypedOp>>> =
-            tract_onnx::onnx()
-                .model_for_path(model_path)?
-                .into_optimized()?
-                .into_runnable()?;
+//         let mut input: Array4<f32> =
+//             tract_ndarray::Array4::<f32>::zeros((game_states.len(), 3, 10, 10));
 
-        Ok(Self { model })
-    }
+//         for (i, game) in game_states.iter().enumerate() {
+//             // Probably a better way of doing this...should game.grid be an ndarray to begin with?
+//             for row in 0..game.grid.len() {
+//                 for col in 0..game.grid[0].len() {
+//                     input[[i, 0, row, col]] = if game.grid[row][col] { 1.0 } else { 0.0 };
+//                 }
+//             }
 
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
-        // Wrap the byte slice in a Cursor to implement `Read`
-        let mut reader: Cursor<&[u8]> = Cursor::new(bytes);
-        // Load the model from the provided byte slice
-        let model = tract_onnx::onnx()
-            .model_for_read(&mut reader)?
-            .into_optimized()?
-            .into_runnable()?;
-        Ok(Self { model })
-    }
-}
+//             // Assuming 2 players
+//             let opponent_index = if player_index == 0 { 1 } else { 0 };
 
-impl Model for TractModel {
-    fn run_inference(&self, game_states: &Vec<&GameState>, player_index: usize) -> Result<Vec<f32>> {
-        // Example input tensor
+//             input[[
+//                 i,
+//                 1,
+//                 game.players[player_index].row,
+//                 game.players[player_index].col,
+//             ]] = 1.0;
 
-        let mut input: Array4<f32> =
-            tract_ndarray::Array4::<f32>::zeros((game_states.len(), 3, 10, 10));
+//             input[[
+//                 i,
+//                 2,
+//                 game.players[opponent_index].row,
+//                 game.players[opponent_index].col,
+//             ]] = -1.0;
+//         }
 
-        for (i, game) in game_states.iter().enumerate() {
-            // Probably a better way of doing this...should game.grid be an ndarray to begin with?
-            for row in 0..game.grid.len() {
-                for col in 0..game.grid[0].len() {
-                    input[[i, 0, row, col]] = if game.grid[row][col] { 1.0 } else { 0.0 };
-                }
-            }
+//         let tensor_input: Tensor = input.into();
 
-            // Assuming 2 players
-            let opponent_index = if player_index == 0 { 1 } else { 0 };
+//         let result: tract_data::internal::tract_smallvec::SmallVec<[TValue; 4]> =
+//             self.model.run(tvec!(tensor_input.into()))?;
 
-            input[[
-                i,
-                1,
-                game.players[player_index].row,
-                game.players[player_index].col,
-            ]] = 1.0;
+//         // result is a SmallVec<[TValue; 4]> from self.model.run(...)
+//         let output_tensor = result[0].clone().into_tensor();
 
-            input[[
-                i,
-                2,
-                game.players[opponent_index].row,
-                game.players[opponent_index].col,
-            ]] = -1.0;
-        }
+//         // If you know the output is always f32, you can try converting it directly:
+//         let output_array: ArrayViewD<f32> = output_tensor.to_array_view::<f32>()?;
 
-        let tensor_input: Tensor = input.into();
+//         // Now you can turn that array into a Vec<f32> by iterating over the elements:
+//         let output_vec: Vec<f32> = output_array.iter().cloned().collect();
 
-        let result: tract_data::internal::tract_smallvec::SmallVec<[TValue; 4]> =
-            self.model.run(tvec!(tensor_input.into()))?;
-
-        // result is a SmallVec<[TValue; 4]> from self.model.run(...)
-        let output_tensor = result[0].clone().into_tensor();
-
-        // If you know the output is always f32, you can try converting it directly:
-        let output_array: ArrayViewD<f32> = output_tensor.to_array_view::<f32>()?;
-
-        // Now you can turn that array into a Vec<f32> by iterating over the elements:
-        let output_vec: Vec<f32> = output_array.iter().cloned().collect();
-
-        Ok(output_vec)
-    }
-}
+//         Ok(output_vec)
+//     }
+// }
 
 // pub struct OrtModel {
 //     model: Session,

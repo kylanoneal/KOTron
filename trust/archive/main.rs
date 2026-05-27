@@ -25,7 +25,6 @@
 
 // use rayon::prelude::*;
 
-
 //     // Hack to make CUDA work
 //     // let path = CString::new("C:\\libtorch\\lib\\torch_cuda.dll").unwrap();
 
@@ -37,18 +36,30 @@
 //     // println!("cudnn: {}", tch::Cuda::cudnn_is_available());
 //     // assert!(Cuda::is_available());
 
+mod nnue;
 
+use anyhow::Result;
+use nnue::QuantizedNnue;
 
+fn main() -> Result<()> {
+    let model = QuantizedNnue::load("quantized_nnue.npz")?;
 
+    println!("Loaded model:");
+    println!("  scale: {}", model.scale);
+    println!("  padding_idx: {}", model.padding_idx);
+    println!("  num_features: {}", model.num_features());
+    println!("  acc_dim: {}", model.acc_dim());
+    println!("  num_fc_layers: {}", model.num_fc_layers());
 
-fn main() {
+    // Example:
+    // let pov_game_state = ...;
+    // let eval = model.run_inference(&pov_game_state)?;
 
-    println!("Hiya");
+    Ok(())
 
     // println!("INNER START");
     // let start = Instant::now();
 
-    
     // let num_threads = 4;
     // (0..num_threads)
     //     .into_par_iter() // Parallel iterator
@@ -56,11 +67,9 @@ fn main() {
 
     // let duration = start.elapsed();
     // println!("OUTER DURATION: {:?}", duration);
-
 }
 // fn run_sims() {
 
-    
 //     // let result = debug_ort();
 //     // match result {
 //     //     Ok(value) => {
@@ -235,7 +244,6 @@ fn main() {
 
 //     max_index
 // }
-
 
 // // Move this into game and change signature to fn get_possible_moves(game, player_index)
 // fn get_possible_moves(row: usize, col: usize, grid: &Vector<Vector<bool>>) -> Vec<Direction> {

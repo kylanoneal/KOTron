@@ -47,6 +47,13 @@ pub struct GameState {
     pub players: Vector<Player>,
 }
 
+#[derive(Clone)]
+pub struct PovGameState {
+    pub game_state: GameState,
+    pub hero_index: usize,
+    pub opponent_index: usize,
+}
+
 #[derive(Copy, Clone)]
 pub struct DirectionUpdate {
     pub player_index: usize,

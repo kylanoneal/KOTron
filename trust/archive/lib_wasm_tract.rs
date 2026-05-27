@@ -19,22 +19,24 @@ use im::{vector, Vector};
 
 // use algos::choose_direction_model_naive;
 use alphabeta::{alphabeta, MinimaxContext, MinimaxResult};
-use nnue::QuantizedNnue;
-use tron::{Direction, GameState, Player};
+use tron::{Direction, DirectionUpdate, GameState, Player};
 
-static NNUE_MODEL: OnceCell<QuantizedNnue> = OnceCell::new();
+static TRACT_MODEL: OnceCell<TractModel> = OnceCell::new();
 
+Init model when the WASM module is instantiated.
 #[wasm_bindgen(start)]
 pub fn start() {
     panic::set_hook(Box::new(console_error_panic_hook::hook));
+    // Embed the ONNX model file at compile time
+    const MODEL_BYTES: &[u8] = include_bytes!("../tron_model_v2.onnx");
 
-    const MODEL_BYTES: &[u8] =
-        include_bytes!(r#"C:\Users\kylan\code\KOTron\tron-python\models\3x3.npz"#);
+    //let model = TractModel::new("tron_model_v2.onnx").expect("failed to init tract model.");
 
-    let model = QuantizedNnue::from_bytes(MODEL_BYTES)
-        .expect("failed to init QuantizedNnue from embedded npz bytes");
+    let model = TractModel::from_bytes(MODEL_BYTES).expect("failed to init model from bytes");
 
-    NNUE_MODEL.set(model).expect("NNUE_MODEL was already set");
+    TRACT_MODEL
+        .set(model)
+        .expect("TRACT_MODEL was already set, this should never happen!");
 }
 
 // Figure out how to use Direction enum and how that would work on the JavaScript side
@@ -66,9 +68,9 @@ pub fn run_engine(
     opponent_row: usize,
     opponent_col: usize,
 ) -> Move {
-    let model: &QuantizedNnue = NNUE_MODEL
+    let model: &TractModel = TRACT_MODEL
         .get()
-        .expect("NNUE_MODEL is not initialized. Did #[wasm_bindgen(start)] run?");
+        .expect("TRACT_MODEL is not initialized. Did #[wasm_bindgen(start)] run?");
 
     let hero = Player {
         row: player_row,
@@ -86,13 +88,13 @@ pub fn run_engine(
 
     let grid: Vector<Vector<bool>> = flatten_to_im_vector(data, num_rows, num_cols);
 
-    let mut game: GameState = tron::new_game(players, num_rows, num_cols);
+    let mut game: GameState = tron::new_game(players, 10, 10);
     // Make a different constructor for this purpose
     game.grid = grid;
 
-    let hero_mm_result: MinimaxResult = alphabeta(
+    let hero_mm_result: MinimaxResult = minimax_alpha_beta_eval_all(
         &game,
-        1,
+        4,
         true,
         f32::NEG_INFINITY,
         f32::INFINITY,

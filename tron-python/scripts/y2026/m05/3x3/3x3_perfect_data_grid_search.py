@@ -189,7 +189,7 @@ def main():
         (8,),
     ]
 
-    CLAMP_VALS = [1.0, 4.0, 16.0]
+    CLAMP_VALS = [16.0]
 
     param_combos = list(
         product(

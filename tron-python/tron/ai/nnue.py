@@ -13,8 +13,8 @@ class NnueTronModel(TronModel):
         num_rows: int,
         num_cols: int,
         acc_dim: int,
-        fc_layer_neuron_counts:tuple, # (8, 16),
-        clamp_val: float #= 1.0,
+        fc_layer_neuron_counts: tuple,  # (8, 16),
+        clamp_val: float,  # = 1.0,
     ):
         super().__init__()
 
@@ -154,9 +154,6 @@ class QuantizedNnueTronModel(TronModel):
     def __init__(self, model: NnueTronModel, scale=256):
 
         assert isinstance(model, NnueTronModel)
-        raise NotImplementedError(
-            "We have more than 2 layers now and using embedding bag"
-        )
 
         super().__init__()
         self.raw_model = model
@@ -167,16 +164,26 @@ class QuantizedNnueTronModel(TronModel):
             dtype=torch.int64
         )
 
-        self.linear_weights = torch.round(model.fc1.weight * scale).to(
+        self.fc_layer_weights = []
+        self.fc_layer_biases = []
+
+        for fc_layer in model.fc_layers:
+
+            self.fc_layer_weights.append(
+                torch.round(fc_layer.weight * scale).to(dtype=torch.int64)
+            )
+
+            self.fc_layer_biases.append(
+                torch.round(fc_layer.bias * scale * scale).to(dtype=torch.int64)
+            )
+
+        self.fc_value_weights = torch.round(model.fc_value.weight * scale).to(
             dtype=torch.int64
         )
-        self.linear_bias = torch.round(model.fc1.bias * scale * scale).to(
+        self.fc_value_bias = torch.round(model.fc_value.bias * scale * scale).to(
             dtype=torch.int64
         )
 
-        assert self.embed_weights.dtype == torch.int64
-        assert self.linear_weights.dtype == torch.int64
-        assert self.linear_bias.dtype == torch.int64
 
     def run_inference_acc(self, acc) -> float:
 

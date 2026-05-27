@@ -1,12 +1,8 @@
 use crate::tron;
 use crate::{
-    models::Model,
-    tron::{Direction, GameState, GameStatus},
+    model::Model,
+    tron::{Direction, GameState, GameStatus, PovGameState},
 };
-
-use im::{vector, Vector};
-use rand::Rng;
-use strum::IntoEnumIterator;
 
 #[derive(Debug, Clone)]
 pub struct MinimaxResult {
@@ -33,7 +29,7 @@ pub struct MinimaxContext<'a> {
 ///
 /// # Returns
 /// A `MinimaxResult` containing the evaluation and the principal variation.
-pub fn minimax_alpha_beta_eval_all(
+pub fn alphabeta(
     game_state: &GameState,
     depth: u32,
     is_maximizing_player: bool,
@@ -58,10 +54,15 @@ pub fn minimax_alpha_beta_eval_all(
     }
 
     if depth == 0 {
-        let eval: f32 = (context
+        let eval: f32 = context
             .model
-            .run_inference(&vec![game_state], maximizing_player)
-            .expect("failed to run inference"))[0];
+            .run_inference(&PovGameState {
+                game_state: game_state.clone(),
+                hero_index: maximizing_player,
+                opponent_index: minimizing_player,
+            })
+            .expect("failed to run inference");
+
         return MinimaxResult {
             evaluation: eval,
             principal_variation: None,
@@ -69,7 +70,7 @@ pub fn minimax_alpha_beta_eval_all(
     }
 
     if is_maximizing_player {
-        let mut possible_directions = tron::get_possible_directions(&game_state, maximizing_player);
+        let possible_directions = tron::get_possible_directions(&game_state, maximizing_player);
         // No available moves for maximizing player.
         if possible_directions.is_empty() {
             let opponent_possible_directions: Vec<Direction> =
@@ -81,7 +82,7 @@ pub fn minimax_alpha_beta_eval_all(
                 };
             } else {
                 return MinimaxResult {
-                    evaluation: -100.0 * (depth as f32),
+                    evaluation: -1000.0 * (depth as f32),
                     principal_variation: None,
                 };
             }
@@ -90,7 +91,7 @@ pub fn minimax_alpha_beta_eval_all(
         let mut max_eval = f32::NEG_INFINITY;
         let mut best_dir = None;
         for direction in possible_directions {
-            let mm_result = minimax_alpha_beta_eval_all(
+            let mm_result = alphabeta(
                 game_state,
                 depth,
                 false,
@@ -118,7 +119,7 @@ pub fn minimax_alpha_beta_eval_all(
         // If the minimizing player has no moves, it is a guaranteed win for the maximizer.
         if possible_directions.is_empty() {
             return MinimaxResult {
-                evaluation: 100.0 * (depth as f32),
+                evaluation: 1000.0 * (depth as f32),
                 principal_variation: None,
             };
         }
@@ -139,15 +140,7 @@ pub fn minimax_alpha_beta_eval_all(
         let mut min_eval = f32::INFINITY;
         let mut best_dir = None;
         for (direction, child_state) in possible_directions.into_iter().zip(child_states.iter()) {
-            let mm_result = minimax_alpha_beta_eval_all(
-                child_state,
-                depth - 1,
-                true,
-                alpha,
-                beta,
-                None,
-                context,
-            );
+            let mm_result = alphabeta(child_state, depth - 1, true, alpha, beta, None, context);
             if mm_result.evaluation < min_eval {
                 min_eval = mm_result.evaluation;
                 best_dir = Some(direction);
