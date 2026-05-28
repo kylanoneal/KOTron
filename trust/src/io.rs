@@ -1,4 +1,4 @@
-use crate::tron::{GameState, Player};
+use crate::tron_2d::{GameState, Player};
 use crate::tron_pb;
 use im::Vector;
 use std::convert::{TryFrom, TryInto};
@@ -6,7 +6,11 @@ use std::convert::{TryFrom, TryInto};
 impl From<GameState> for tron_pb::GameState {
     fn from(state: GameState) -> Self {
         let num_rows = state.grid.len();
-        let num_cols = if num_rows == 0 { 0 } else { state.grid[0].len() };
+        let num_cols = if num_rows == 0 {
+            0
+        } else {
+            state.grid[0].len()
+        };
 
         tron_pb::GameState {
             num_rows: num_rows as i32,

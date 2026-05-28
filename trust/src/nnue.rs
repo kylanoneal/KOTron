@@ -1,6 +1,6 @@
 use crate::{
     model::Model,
-    tron::{GameState, PovGameState},
+    tron_2d::{GameState, PovGameState},
 };
 use anyhow::{bail, Context, Result};
 use ndarray::{Array1, Array2};
@@ -12,6 +12,7 @@ use std::path::Path;
 #[derive(Debug)]
 pub struct QuantizedNnue {
     pub scale: i64,
+    pub clamp: i64,
     pub padding_idx: usize,
 
     pub embed_weights: Array2<i64>,
@@ -45,10 +46,12 @@ impl QuantizedNnue {
         R: Read + Seek,
     {
         let scale_arr: Array1<i64> = npz.by_name("scale.npy")?;
+        let clamp_arr: Array1<i64> = npz.by_name("clamp.npy")?;
         let padding_idx_arr: Array1<i64> = npz.by_name("padding_idx.npy")?;
         let num_fc_layers_arr: Array1<i64> = npz.by_name("num_fc_layers.npy")?;
 
         let scale = scale_arr[0];
+        let clamp = clamp_arr[0];
         let padding_idx = padding_idx_arr[0] as usize;
         let num_fc_layers = num_fc_layers_arr[0] as usize;
 
@@ -84,6 +87,7 @@ impl QuantizedNnue {
 
         let model = Self {
             scale,
+            clamp,
             padding_idx,
             embed_weights,
             fc_layer_weights,
@@ -195,7 +199,7 @@ impl QuantizedNnue {
 
         let mut x = acc.to_vec();
 
-        clamp_in_place(&mut x, 0, self.scale);
+        clamp_in_place(&mut x, 0, self.scale * self.clamp);
 
         for (layer_idx, (weight, bias)) in self
             .fc_layer_weights
@@ -203,10 +207,10 @@ impl QuantizedNnue {
             .zip(self.fc_layer_biases.iter())
             .enumerate()
         {
-            x = linear_requantized(&x, weight, bias, self.scale)
+            x = linear_raw(&x, weight, bias)
                 .with_context(|| format!("Failed during FC layer {}", layer_idx))?;
-
-            clamp_in_place(&mut x, 0, self.scale);
+            let layer_clamp = self.clamp * (self.scale.pow((layer_idx + 2) as u32));
+            clamp_in_place(&mut x, 0, self.scale * layer_clamp);
         }
 
         let out = linear_raw(&x, &self.fc_value_weights, &self.fc_value_bias)
@@ -219,7 +223,7 @@ impl QuantizedNnue {
             );
         }
 
-        let denom = (self.scale * self.scale) as f32;
+        let denom = (self.scale.pow(2 + self.fc_layer_weights.len() as u32)) as f32;
         Ok(out[0] as f32 / denom)
     }
 
@@ -498,28 +502,4 @@ fn linear_raw(x: &[i64], weight: &Array2<i64>, bias: &Array1<i64>) -> Result<Vec
     }
 
     Ok(out)
-}
-
-fn linear_requantized(
-    x: &[i64],
-    weight: &Array2<i64>,
-    bias: &Array1<i64>,
-    scale: i64,
-) -> Result<Vec<i64>> {
-    let raw = linear_raw(x, weight, bias)?;
-
-    Ok(raw
-        .into_iter()
-        .map(|v| div_round_nearest(v, scale))
-        .collect())
-}
-
-fn div_round_nearest(x: i64, divisor: i64) -> i64 {
-    assert!(divisor > 0);
-
-    if x >= 0 {
-        (x + divisor / 2) / divisor
-    } else {
-        (x - divisor / 2) / divisor
-    }
 }

@@ -2,12 +2,13 @@ use anyhow::Result;
 use core::f32;
 use im::{vector, Vector};
 use std::time::Instant;
-use trust::tron;
+use trust::tron_2d::{self, PovGameState};
 
 use trust::{
     alphabeta::{alphabeta, MinimaxContext, MinimaxResult},
+    model::Model,
     nnue::QuantizedNnue,
-    tron::{Direction, GameStatus, Player, StatusInfo},
+    tron_2d::{Direction, GameState, GameStatus, Player, StatusInfo},
 };
 
 fn main() {
@@ -29,99 +30,133 @@ fn run_sims() -> Result<()> {
     println!("  acc_dim: {}", nnue_model.acc_dim());
     println!("  num_fc_layers: {}", nnue_model.num_fc_layers());
 
-    // Example:
-    // let pov_game_state = ...;
-    // let eval = nnue_model.run_inference(&pov_game_state)?;
-
-    let p1 = Player {
-        row: 0,
-        col: 0,
-        can_move: true,
+    let example = PovGameState {
+        game_state: GameState {
+            grid: vector![
+                vector![false, true, true],
+                vector![false, true, true],
+                vector![true, true, true],
+            ],
+            players: vector![
+                Player {
+                    row: 2,
+                    col: 0,
+                    can_move: true,
+                },
+                Player {
+                    row: 2,
+                    col: 2,
+                    can_move: true,
+                },
+            ],
+        },
+        hero_index: 0,
+        opponent_index: 1,
     };
 
-    let p2 = Player {
-        row: 2,
-        col: 2,
-        can_move: true,
+    let mirrored = PovGameState {
+        game_state: example.game_state.clone(),
+        hero_index: 1,
+        opponent_index: 0,
     };
 
-    println!("starting sims");
-    let n_games = 100;
-    let start = Instant::now();
+    let eval = nnue_model.run_inference(&example)?;
+    let eval_mirrored = nnue_model.run_inference(&mirrored)?;
 
-    let mut p1_wins = 0;
-    let mut p2_wins = 0;
-    let mut ties = 0;
-
-    for i in 0..n_games {
-        let start_players: Vector<Player> = vector![p1, p2];
-        let mut curr_game = tron::new_game(start_players, 3, 3);
-
-        let mut curr_status: StatusInfo = tron::get_status(&curr_game);
-
-        while curr_status.status == GameStatus::InProgress {
-            // bot chooses player directions
-
-            let p1_mm_result: MinimaxResult = alphabeta(
-                &curr_game,
-                1,
-                true,
-                f32::NEG_INFINITY,
-                f32::INFINITY,
-                None,
-                &MinimaxContext {
-                    model: &nnue_model,
-                    maximizing_player: 0,
-                    minimizing_player: 1,
-                },
-            );
-
-            let p2_mm_result: MinimaxResult = alphabeta(
-                &curr_game,
-                1,
-                true,
-                f32::NEG_INFINITY,
-                f32::INFINITY,
-                None,
-                &MinimaxContext {
-                    model: &nnue_model,
-                    maximizing_player: 1,
-                    minimizing_player: 0,
-                },
-            );
-
-            let p1_direction: Direction = p1_mm_result.principal_variation.unwrap_or(Direction::Up);
-            let p2_direction: Direction = p2_mm_result.principal_variation.unwrap_or(Direction::Up);
-
-            let directions: [Direction; 2] = [p1_direction, p2_direction];
-            curr_game = tron::next(&curr_game, &directions);
-            curr_status = tron::get_status(&curr_game);
-        }
-
-        println!("{i}");
-        if curr_status.status == GameStatus::Tie {
-            ties += 1;
-            println!("Tie");
-        } else {
-            let winner_index = curr_status
-                .winner_index
-                .expect("Winner index should be set");
-            if winner_index == 0 {
-                p1_wins += 1;
-                println!("P1 win!");
-            } else if winner_index == 1 {
-                p2_wins += 1;
-                println!("P2 win!");
-            }
-        }
-    }
-
-    // println!("Game completed!: {:?}", game.status);
-
-    let duration = start.elapsed();
-    println!("Time to run {} games: {:?}", n_games, duration);
-
-    println!("P1 wins: {}, p2 wins: {}, ties: {}", p1_wins, p2_wins, ties);
+    println!("  eval: {}", eval);
+    println!("  mirrored: {}", eval_mirrored);
 
     Ok(())
+
+    // let p1 = Player {
+    //     row: 0,
+    //     col: 0,
+    //     can_move: true,
+    // };
+
+    // let p2 = Player {
+    //     row: 2,
+    //     col: 2,
+    //     can_move: true,
+    // };
+
+    // println!("starting sims");
+    // let n_games = 100;
+    // let start = Instant::now();
+
+    // let mut p1_wins = 0;
+    // let mut p2_wins = 0;
+    // let mut ties = 0;
+
+    // for i in 0..n_games {
+    //     let start_players: Vector<Player> = vector![p1, p2];
+    //     let mut curr_game = tron::new_game(start_players, 3, 3);
+
+    //     let mut curr_status: StatusInfo = tron::get_status(&curr_game);
+
+    //     while curr_status.status == GameStatus::InProgress {
+    //         // bot chooses player directions
+
+    //         let p1_mm_result: MinimaxResult = alphabeta(
+    //             &curr_game,
+    //             1,
+    //             true,
+    //             f32::NEG_INFINITY,
+    //             f32::INFINITY,
+    //             None,
+    //             &MinimaxContext {
+    //                 model: &nnue_model,
+    //                 maximizing_player: 0,
+    //                 minimizing_player: 1,
+    //             },
+    //         );
+
+    //         let p2_mm_result: MinimaxResult = alphabeta(
+    //             &curr_game,
+    //             1,
+    //             true,
+    //             f32::NEG_INFINITY,
+    //             f32::INFINITY,
+    //             None,
+    //             &MinimaxContext {
+    //                 model: &nnue_model,
+    //                 maximizing_player: 1,
+    //                 minimizing_player: 0,
+    //             },
+    //         );
+
+    //         let p1_direction: Direction = p1_mm_result.principal_variation.unwrap_or(Direction::Up);
+    //         let p2_direction: Direction = p2_mm_result.principal_variation.unwrap_or(Direction::Up);
+
+    //         let directions: [Direction; 2] = [p1_direction, p2_direction];
+    //         curr_game = tron::next(&curr_game, &directions);
+    //         curr_status = tron::get_status(&curr_game);
+    //     }
+
+    //     println!("{i}");
+    //     if curr_status.status == GameStatus::Tie {
+    //         ties += 1;
+    //         println!("Tie");
+    //     } else {
+    //         let winner_index = curr_status
+    //             .winner_index
+    //             .expect("Winner index should be set");
+    //         if winner_index == 0 {
+    //             p1_wins += 1;
+    //             println!("P1 win!");
+    //         } else if winner_index == 1 {
+    //             p2_wins += 1;
+    //             println!("P2 win!");
+    //         }
+    //     }
+    // }
+
+    // // println!("Game completed!: {:?}", game.status);
+
+    // let duration = start.elapsed();
+    // println!("Time to run {} games: {:?}", n_games, duration);
+
+    // println!("P1 wins: {}, p2 wins: {}, ties: {}", p1_wins, p2_wins, ties);
+
+    // Ok(())
 }

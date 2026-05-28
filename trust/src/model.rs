@@ -1,4 +1,4 @@
-use crate::tron::PovGameState;
+use crate::tron_2d::PovGameState;
 use anyhow::Result;
 
 pub trait Model {

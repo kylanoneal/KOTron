@@ -167,41 +167,46 @@ class QuantizedNnueTronModel(TronModel):
         self.fc_layer_weights = []
         self.fc_layer_biases = []
 
-        for fc_layer in model.fc_layers:
+        for i, fc_layer in enumerate(model.fc_layers):
 
             self.fc_layer_weights.append(
                 torch.round(fc_layer.weight * scale).to(dtype=torch.int64)
             )
 
             self.fc_layer_biases.append(
-                torch.round(fc_layer.bias * scale * scale).to(dtype=torch.int64)
+                torch.round(fc_layer.bias * (scale ** (i + 2))).to(dtype=torch.int64)
             )
 
         self.fc_value_weights = torch.round(model.fc_value.weight * scale).to(
             dtype=torch.int64
         )
-        self.fc_value_bias = torch.round(model.fc_value.bias * scale * scale).to(
-            dtype=torch.int64
-        )
-
+        self.fc_value_bias = torch.round(
+            model.fc_value.bias * (scale ** (2 + len(model.fc_layers)))
+        ).to(dtype=torch.int64)
 
     def run_inference_acc(self, acc) -> float:
 
         assert acc.dtype == torch.int64
         # 2. Clamp to [0, scale]
-        acc = torch.clamp(acc, 0, self.scale)
+        x = torch.clamp(acc, 0, self.scale * self.raw_model.clamp_val)
         # print(f"After clamp: {acc.sum().item()/ 1024=}")
 
-        # 3. Linear layer in integer domain
-        #    (1 x acc_dim) @ (acc_dim) -> scalar
-        y_int = (self.linear_weights @ acc) + self.linear_bias
+        for i, (fc_weights, fc_bias) in enumerate(
+            zip(self.fc_layer_weights, self.fc_layer_biases)
+        ):
 
+            x = (fc_weights @ x) + fc_bias
+
+            clamp = self.raw_model.clamp_val * (self.scale ** (i + 2))
+            x = torch.clamp(x, 0, clamp)
         # print(f"After linear: {y_int.sum().item()/ 1024 / 1024=}")
 
-        # 4. Rescale back to float
-        y = y_int.float() / (self.scale * self.scale)
+        x = (self.fc_value_weights @ x) + self.fc_value_bias
 
-        return y.item()
+        # 4. Rescale back to float
+        x = x.float() / (self.scale ** (2 + len(self.fc_layer_weights)))
+
+        return x.item()
 
     def initialize_acc(self, pov_game_state):
 
@@ -215,9 +220,6 @@ class QuantizedNnueTronModel(TronModel):
 
     def run_inference(self, pov_game_state: PovGameState) -> float:
 
-        raise NotImplementedError(
-            "Changed how running inference on NNUE's work, rethink this"
-        )
         acc = self.initialize_acc(pov_game_state)
 
         return self.run_inference_acc(acc)

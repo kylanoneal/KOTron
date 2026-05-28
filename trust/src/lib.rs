@@ -3,7 +3,7 @@ pub mod alphabeta;
 pub mod io;
 pub mod model;
 pub mod nnue;
-pub mod tron;
+pub mod tron_2d;
 
 pub mod tron_pb {
     include!(concat!(env!("OUT_DIR"), "/tron_pb.rs"));
@@ -20,21 +20,34 @@ use im::{vector, Vector};
 // use algos::choose_direction_model_naive;
 use alphabeta::{alphabeta, MinimaxContext, MinimaxResult};
 use nnue::QuantizedNnue;
-use tron::{Direction, GameState, Player};
+use tron_2d::{Direction, GameState, Player};
 
-static NNUE_MODEL: OnceCell<QuantizedNnue> = OnceCell::new();
+static NNUE_MODEL_3X3: OnceCell<QuantizedNnue> = OnceCell::new();
+static NNUE_MODEL_4X4: OnceCell<QuantizedNnue> = OnceCell::new();
 
 #[wasm_bindgen(start)]
 pub fn start() {
     panic::set_hook(Box::new(console_error_panic_hook::hook));
 
-    const MODEL_BYTES: &[u8] =
+    const MODEL_3X3_BYTES: &[u8] =
         include_bytes!(r#"C:\Users\kylan\code\KOTron\tron-python\models\3x3.npz"#);
 
-    let model = QuantizedNnue::from_bytes(MODEL_BYTES)
-        .expect("failed to init QuantizedNnue from embedded npz bytes");
+    const MODEL_4X4_BYTES: &[u8] =
+        include_bytes!(r#"C:\Users\kylan\code\KOTron\tron-python\models\4x4.npz"#);
 
-    NNUE_MODEL.set(model).expect("NNUE_MODEL was already set");
+    let model_3x3 = QuantizedNnue::from_bytes(MODEL_3X3_BYTES)
+        .expect("failed to init 3x3 QuantizedNnue from embedded npz bytes");
+
+    let model_4x4 = QuantizedNnue::from_bytes(MODEL_4X4_BYTES)
+        .expect("failed to init 4x4 QuantizedNnue from embedded npz bytes");
+
+    NNUE_MODEL_3X3
+        .set(model_3x3)
+        .expect("NNUE_MODEL_3X3 was already set");
+
+    NNUE_MODEL_4X4
+        .set(model_4x4)
+        .expect("NNUE_MODEL_4X4 was already set");
 }
 
 // Figure out how to use Direction enum and how that would work on the JavaScript side
@@ -56,6 +69,23 @@ impl Move {
     }
 }
 
+fn get_nnue_model(num_rows: usize, num_cols: usize) -> &'static QuantizedNnue {
+    match (num_rows, num_cols) {
+        (3, 3) => NNUE_MODEL_3X3
+            .get()
+            .expect("NNUE_MODEL_3X3 is not initialized. Did #[wasm_bindgen(start)] run?"),
+
+        (4, 4) => NNUE_MODEL_4X4
+            .get()
+            .expect("NNUE_MODEL_4X4 is not initialized. Did #[wasm_bindgen(start)] run?"),
+
+        _ => panic!(
+            "No NNUE model available for board size {}x{}",
+            num_rows, num_cols
+        ),
+    }
+}
+
 #[wasm_bindgen]
 pub fn run_engine(
     data: &[u8],
@@ -66,10 +96,7 @@ pub fn run_engine(
     opponent_row: usize,
     opponent_col: usize,
 ) -> Move {
-    let model: &QuantizedNnue = NNUE_MODEL
-        .get()
-        .expect("NNUE_MODEL is not initialized. Did #[wasm_bindgen(start)] run?");
-
+    let model: &QuantizedNnue = get_nnue_model(num_rows, num_cols);
     let hero = Player {
         row: player_row,
         col: player_col,
@@ -86,7 +113,7 @@ pub fn run_engine(
 
     let grid: Vector<Vector<bool>> = flatten_to_im_vector(data, num_rows, num_cols);
 
-    let mut game: GameState = tron::new_game(players, num_rows, num_cols);
+    let mut game: GameState = tron_2d::new_game(players, num_rows, num_cols);
     // Make a different constructor for this purpose
     game.grid = grid;
 

@@ -15,6 +15,7 @@ def export_quantized_nnue(
 
     data = {
         "scale": np.array([model.scale], dtype=dtype),
+        "clamp": np.array([model.raw_model.clamp_val], dtype=dtype),
         "padding_idx": np.array([model.raw_model.padding_idx], dtype=dtype),
         "embed_weights": model.embed_weights.cpu().numpy().astype(dtype),
         "fc_value_weights": model.fc_value_weights.cpu().numpy().astype(dtype),
