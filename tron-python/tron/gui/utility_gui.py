@@ -1,6 +1,6 @@
 from typing import Optional
-from tron.game import Direction
-from tron.ai.minimax import MinimaxDebugState
+from tron.game import Direction, from_bitboard
+from tron.ai.minimax import MinimaxArgs
 
 import pygame
 from pygame.locals import *
@@ -35,8 +35,10 @@ def init_utility_gui(game_dimension):
     clock = pygame.time.Clock()
 
 
-def show_game_state(game, step_through=False, minimax_debug_state: Optional[MinimaxDebugState] = None):
+def show_game_state(game, step_through=False, minimax_args: Optional[MinimaxArgs] = None):
     global gui_initialized
+
+    game = from_bitboard(game)
 
     if not gui_initialized:
         init_utility_gui(len(game.grid))
@@ -57,8 +59,8 @@ def show_game_state(game, step_through=False, minimax_debug_state: Optional[Mini
         headx, heady = player.col * screen_factor, player.row * screen_factor
         screen.fill(color, pygame.Rect(headx, heady, screen_factor, screen_factor))
 
-    if minimax_debug_state is not None:
-        show_minimax_debug_info(minimax_debug_state)
+    if minimax_args is not None:
+        show_minimax_args(minimax_args)
 
     pygame.event.pump()
     pygame.display.flip()
@@ -87,12 +89,12 @@ def show_game_state(game, step_through=False, minimax_debug_state: Optional[Mini
             return None
 
 
-def show_minimax_debug_info(minimax_debug_state: MinimaxDebugState):
+def show_minimax_args(minimax_args: MinimaxArgs):
     font = pygame.font.Font(None, 36)  # 'None' uses the default font; size is 36
 
     # Render the text
     text = font.render(
-        f"Maximizing Player?  {minimax_debug_state.is_maximizing_player}",
+        f"Maximizing Player?  {minimax_args.is_maximizing_player}",
         True,
         WHITE,
     )  # True enables anti-aliasing
@@ -103,7 +105,7 @@ def show_minimax_debug_info(minimax_debug_state: MinimaxDebugState):
 
     # Render the text
     text = font.render(
-        f"Maximizing Player Move:  {minimax_debug_state.maximizing_player_move}",
+        f"Maximizing Player Move:  {minimax_args.maximizing_player_move}",
         True,
         WHITE,
     )  # True enables anti-aliasing
@@ -114,7 +116,7 @@ def show_minimax_debug_info(minimax_debug_state: MinimaxDebugState):
 
     # Render the text
     text = font.render(
-        f"Depth:  {minimax_debug_state.depth}, Alpha:  {minimax_debug_state.alpha}, Beta:  {minimax_debug_state.beta}",
+        f"Depth:  {minimax_args.depth}, Alpha:  {minimax_args.alpha}, Beta:  {minimax_args.beta}",
         True,
         WHITE,
     )  # True enables anti-aliasing
