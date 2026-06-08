@@ -1,8 +1,7 @@
-// use crate::{tron::{GameState, Direction, DirectionUpdate, Player}, models::Model}; 
+// use crate::{tron::{GameState, Direction, DirectionUpdate, Player}, models::Model};
 
 // use im::{vector, Vector};
 // use rand::Rng;
-
 
 // pub fn choose_direction_random(game: &GameState, player_index: usize) -> DirectionUpdate {
 //     let possible_moves: Vec<Direction> = get_possible_moves(
@@ -98,5 +97,3 @@
 
 //     max_index
 // }
-
-

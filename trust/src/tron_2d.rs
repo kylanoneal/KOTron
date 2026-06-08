@@ -1,6 +1,7 @@
 use im::Vector;
 use strum::IntoEnumIterator;
-use strum_macros::EnumIter;
+
+pub use crate::tron::{Direction, GameStatus, StatusInfo};
 
 #[derive(Copy, Clone)]
 pub struct Player {
@@ -49,8 +50,8 @@ pub fn next(game: &GameState2D, directions: &[Direction]) -> GameState2D {
 
         if player.can_move {
             let (delta_row, delta_col) = direction.value();
-            let new_row = (player.row as i8) + delta_row;
-            let new_col = (player.col as i8) + delta_col;
+            let new_row = (player.row as isize) + (delta_row as isize);
+            let new_col = (player.col as isize) + (delta_col as isize);
 
             if !in_bounds(&game, new_row, new_col) || game.grid[new_row as usize][new_col as usize]
             {
@@ -107,9 +108,8 @@ pub fn next(game: &GameState2D, directions: &[Direction]) -> GameState2D {
     }
 }
 
-pub fn in_bounds(game: &GameState2D, row: i8, col: i8) -> bool {
-    // Fix the cringe i8 bullshit
-    row >= 0 && col >= 0 && row < (game.grid.len() as i8) && col < (game.grid[0].len() as i8)
+pub fn in_bounds(game: &GameState2D, row: isize, col: isize) -> bool {
+    row >= 0 && col >= 0 && row < (game.grid.len() as isize) && col < (game.grid[0].len() as isize)
 }
 
 // Move this into game and change signature to pub fn get_possible_moves(game, player_index)
@@ -119,8 +119,8 @@ pub fn get_possible_directions(game: &GameState2D, player_index: usize) -> Vec<D
 
     let mut possible_moves: Vec<Direction> = Vec::new();
     for direction in Direction::iter() {
-        let new_row: i8 = (p_row as i8) + direction.value().0;
-        let new_col: i8 = (p_col as i8) + direction.value().1;
+        let new_row: isize = (p_row as isize) + (direction.value().0 as isize);
+        let new_col: isize = (p_col as isize) + (direction.value().1 as isize);
 
         if in_bounds(game, new_row, new_col) && !game.grid[new_row as usize][new_col as usize] {
             possible_moves.push(direction);

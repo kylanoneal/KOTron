@@ -1,26 +1,14 @@
-use crate::tron_2d::{GameState, Player};
+use crate::tron::{BitBoard, GameState, Player};
 use crate::tron_pb;
-use im::Vector;
 use std::convert::{TryFrom, TryInto};
 
 impl From<GameState> for tron_pb::GameState {
     fn from(state: GameState) -> Self {
-        let num_rows = state.grid.len();
-        let num_cols = if num_rows == 0 {
-            0
-        } else {
-            state.grid[0].len()
-        };
-
         tron_pb::GameState {
-            num_rows: num_rows as i32,
-            num_cols: num_cols as i32,
-            board: board_to_bytes(&state.grid, num_cols),
-            players: state
-                .players
-                .iter()
-                .map(|player| player_to_proto(*player, num_cols))
-                .collect(),
+            num_rows: state.num_rows as i32,
+            num_cols: state.num_cols as i32,
+            board: state.board.to_le_bytes(),
+            players: state.players.into_iter().map(player_to_proto).collect(),
         }
     }
 }
@@ -36,25 +24,16 @@ impl TryFrom<tron_pb::GameState> for GameState {
         let num_rows = proto.num_rows as usize;
         let num_cols = proto.num_cols as usize;
         let num_cells = num_rows.checked_mul(num_cols).ok_or("grid is too large")?;
-
-        let mut grid: Vector<Vector<bool>> = Vector::new();
-        for row in 0..num_rows {
-            let cells: Vec<bool> = (0..num_cols)
-                .map(|col| bit_is_set(&proto.board, row * num_cols + col))
-                .collect();
-            grid.push_back(Vector::from(cells));
-        }
+        let board = BitBoard::from_le_bytes(num_cells, &proto.board)
+            .map_err(|_| "board has bits set outside the grid")?;
 
         let players_vec: Vec<Player> = proto
             .players
             .into_iter()
-            .map(|player| player_from_proto(player, num_cols, num_cells))
+            .map(|player| player_from_proto(player, num_cells))
             .collect::<Result<Vec<_>, _>>()?;
 
-        Ok(GameState {
-            grid,
-            players: Vector::from(players_vec),
-        })
+        GameState::try_new(num_rows, num_cols, board, players_vec).map_err(|_| "invalid game state")
     }
 }
 
@@ -98,18 +77,14 @@ impl TryFrom<tron_pb::Games> for Vec<Vec<GameState>> {
     }
 }
 
-fn player_to_proto(player: Player, num_cols: usize) -> tron_pb::Player {
+fn player_to_proto(player: Player) -> tron_pb::Player {
     tron_pb::Player {
-        idx: (player.row * num_cols + player.col) as i32,
+        idx: player.idx as i32,
         can_move: player.can_move,
     }
 }
 
-fn player_from_proto(
-    proto: tron_pb::Player,
-    num_cols: usize,
-    num_cells: usize,
-) -> Result<Player, &'static str> {
+fn player_from_proto(proto: tron_pb::Player, num_cells: usize) -> Result<Player, &'static str> {
     if proto.idx < 0 {
         return Err("player idx cannot be negative");
     }
@@ -119,39 +94,8 @@ fn player_from_proto(
         return Err("player idx is out of bounds");
     }
 
-    if num_cols == 0 {
-        return Err("player idx requires positive num_cols");
-    }
-
     Ok(Player {
-        row: idx / num_cols,
-        col: idx % num_cols,
+        idx,
         can_move: proto.can_move,
     })
-}
-
-fn board_to_bytes(grid: &Vector<Vector<bool>>, num_cols: usize) -> Vec<u8> {
-    let num_cells = grid.len() * num_cols;
-    let mut board = vec![0u8; (num_cells + 7) / 8];
-
-    for (row_index, row) in grid.iter().enumerate() {
-        for (col_index, occupied) in row.iter().enumerate() {
-            if *occupied {
-                let idx = row_index * num_cols + col_index;
-                board[idx / 8] |= 1u8 << (idx % 8);
-            }
-        }
-    }
-
-    while board.last() == Some(&0) {
-        board.pop();
-    }
-
-    board
-}
-
-fn bit_is_set(board: &[u8], idx: usize) -> bool {
-    board
-        .get(idx / 8)
-        .map_or(false, |byte| (byte & (1u8 << (idx % 8))) != 0)
 }

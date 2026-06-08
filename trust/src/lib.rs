@@ -3,6 +3,7 @@ pub mod alphabeta;
 pub mod io;
 pub mod model;
 pub mod nnue;
+pub mod tron;
 pub mod tron_2d;
 
 pub mod tron_pb {
@@ -15,12 +16,10 @@ use std::panic;
 
 use wasm_bindgen::prelude::*;
 
-use im::{vector, Vector};
-
 // use algos::choose_direction_model_naive;
 use alphabeta::{alphabeta, MinimaxContext, MinimaxResult};
 use nnue::QuantizedNnue;
-use tron_2d::{Direction, GameState, Player};
+use tron::{BitBoard, Direction, GameState, Player};
 
 static NNUE_MODEL_3X3: OnceCell<QuantizedNnue> = OnceCell::new();
 static NNUE_MODEL_4X4: OnceCell<QuantizedNnue> = OnceCell::new();
@@ -97,25 +96,26 @@ pub fn run_engine(
     opponent_col: usize,
 ) -> Move {
     let model: &QuantizedNnue = get_nnue_model(num_rows, num_cols);
+    let hero_idx = player_row * num_cols + player_col;
+    let villain_idx = opponent_row * num_cols + opponent_col;
+
     let hero = Player {
-        row: player_row,
-        col: player_col,
+        idx: hero_idx,
         can_move: true,
     };
 
     let villain = Player {
-        row: opponent_row,
-        col: opponent_col,
+        idx: villain_idx,
         can_move: true,
     };
 
-    let players: Vector<Player> = vector![hero, villain];
+    let num_cells = num_rows * num_cols;
+    let mut board =
+        BitBoard::from_flat_occupancy(data, num_cells).expect("invalid flat occupancy board");
+    board.set(hero_idx);
+    board.set(villain_idx);
 
-    let grid: Vector<Vector<bool>> = flatten_to_im_vector(data, num_rows, num_cols);
-
-    let mut game: GameState = tron_2d::new_game(players, num_rows, num_cols);
-    // Make a different constructor for this purpose
-    game.grid = grid;
+    let game = GameState::new(num_rows, num_cols, board, vec![hero, villain]);
 
     let hero_mm_result: MinimaxResult = alphabeta(
         &game,
@@ -139,28 +139,4 @@ pub fn run_engine(
         row_offset: row_offset,
         col_offset: col_offset,
     };
-}
-
-fn flatten_to_im_vector(data: &[u8], rows: usize, cols: usize) -> Vector<Vector<bool>> {
-    assert!(
-        data.len() == rows * cols,
-        "Data length ({}) does not match rows * cols ({})",
-        data.len(),
-        rows * cols
-    );
-
-    // Initialize the outer Vector
-    let mut grid = Vector::new();
-
-    for row in 0..rows {
-        let start = row * cols;
-        let end = start + cols;
-        // Slice the data for the current row
-        let row_slice = &data[start..end];
-        // Convert to Vector<bool>
-        let row_vector: Vector<bool> = row_slice.iter().map(|&b| b != 0).collect();
-        grid.push_back(row_vector);
-    }
-
-    grid
 }

@@ -1,14 +1,10 @@
 use anyhow::Result;
-use core::f32;
-use im::{vector, Vector};
 use std::time::Instant;
-use trust::tron_2d::{self, PovGameState};
 
 use trust::{
-    alphabeta::{alphabeta, MinimaxContext, MinimaxResult},
     model::Model,
     nnue::QuantizedNnue,
-    tron_2d::{Direction, GameState, GameStatus, Player, StatusInfo},
+    tron::{BitBoard, GameState, Player, PovGameState},
 };
 
 fn main() {
@@ -31,25 +27,21 @@ fn run_sims() -> Result<()> {
     println!("  num_fc_layers: {}", nnue_model.num_fc_layers());
 
     let example = PovGameState {
-        game_state: GameState {
-            grid: vector![
-                vector![false, true, true],
-                vector![false, true, true],
-                vector![true, true, true],
-            ],
-            players: vector![
+        game_state: GameState::new(
+            3,
+            3,
+            BitBoard::from_indices([1, 2, 4, 5, 6, 7, 8]),
+            vec![
                 Player {
-                    row: 2,
-                    col: 0,
+                    idx: 6,
                     can_move: true,
                 },
                 Player {
-                    row: 2,
-                    col: 2,
+                    idx: 8,
                     can_move: true,
                 },
             ],
-        },
+        ),
         hero_index: 0,
         opponent_index: 1,
     };

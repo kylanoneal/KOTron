@@ -19,6 +19,8 @@ from tron.game import (
 )
 from tron.ai.tron_model import TronModel, PovGameState
 
+from tron.enums import PovGameResult
+
 
 @dataclass(frozen=True)
 class LabeledExample:
@@ -127,12 +129,13 @@ def make_k_folds(
     return tuple(folds)
 
 
-def get_label_magnitude(steps_until_terminal: int):
+def get_label_magnitude(pov_result: PovGameResult, steps_until_terminal: int):
 
     assert steps_until_terminal >= 1
     assert isinstance(steps_until_terminal, int)
 
     return 0.8 ** (steps_until_terminal - 1)
+
 
 
 def make_dataset(

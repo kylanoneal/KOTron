@@ -1,6 +1,6 @@
 use crate::{
     model::Model,
-    tron_2d::{GameState, PovGameState},
+    tron::{get_wall_indices, PovGameState},
 };
 use anyhow::{bail, Context, Result};
 use ndarray::{Array1, Array2};
@@ -321,28 +321,25 @@ pub fn pov_game_state_to_feature_indices(
 ) -> Result<Vec<usize>> {
     let game_state = &pov_game_state.game_state;
 
-    let num_rows = game_state.grid.len();
-
-    if num_rows == 0 {
+    if game_state.num_rows == 0 {
         bail!("Game grid has zero rows");
     }
 
-    let num_cols = game_state.grid[0].len();
-
-    if num_cols == 0 {
+    if game_state.num_cols == 0 {
         bail!("Game grid has zero columns");
     }
 
-    validate_rectangular_grid(game_state)?;
-
-    let num_cells = num_rows * num_cols;
+    let num_cells = game_state
+        .num_rows
+        .checked_mul(game_state.num_cols)
+        .context("Game grid is too large")?;
 
     if padding_idx != num_cells * 3 {
         bail!(
             "Expected padding_idx={} for a {}x{} board, but model has padding_idx={}",
             num_cells * 3,
-            num_rows,
-            num_cols,
+            game_state.num_rows,
+            game_state.num_cols,
             padding_idx
         );
     }
@@ -365,88 +362,44 @@ pub fn pov_game_state_to_feature_indices(
 
     let mut indices = Vec::with_capacity(num_cells + 2);
 
-    // Occupied/wall cell features.
-    //
-    // Feature range:
-    //   [0, num_cells)
-    for row in 0..num_rows {
-        for col in 0..num_cols {
-            if game_state.grid[row][col] {
-                indices.push(cell_index(row, col, num_cols));
-            }
-        }
-    }
-
     let hero = game_state.players[pov_game_state.hero_index];
     let opponent = game_state.players[pov_game_state.opponent_index];
 
-    validate_player_position(hero.row, hero.col, num_rows, num_cols, "hero")?;
-    validate_player_position(opponent.row, opponent.col, num_rows, num_cols, "opponent")?;
-
-    let hero_cell = cell_index(hero.row, hero.col, num_cols);
-    let opponent_cell = cell_index(opponent.row, opponent.col, num_cols);
+    validate_player_index(hero.idx, num_cells, "hero")?;
+    validate_player_index(opponent.idx, num_cells, "opponent")?;
 
     // Hero position features.
     //
     // Feature range:
     //   [num_cells, 2 * num_cells)
-    indices.push(num_cells + hero_cell);
+    indices.push(num_cells + hero.idx);
 
     // Opponent position features.
     //
     // Feature range:
     //   [2 * num_cells, 3 * num_cells)
-    indices.push((2 * num_cells) + opponent_cell);
+    indices.push((2 * num_cells) + opponent.idx);
+
+    // Occupied/wall cell features.
+    //
+    // Feature range:
+    //   [0, num_cells)
+    indices.extend(get_wall_indices(game_state));
 
     Ok(indices)
 }
 
-fn validate_rectangular_grid(game_state: &GameState) -> Result<()> {
-    let num_rows = game_state.grid.len();
-
-    if num_rows == 0 {
-        bail!("Game grid has zero rows");
-    }
-
-    let num_cols = game_state.grid[0].len();
-
-    for row in 0..num_rows {
-        if game_state.grid[row].len() != num_cols {
-            bail!(
-                "Grid is not rectangular. Row 0 has len {}, but row {} has len {}",
-                num_cols,
-                row,
-                game_state.grid[row].len()
-            );
-        }
-    }
-
-    Ok(())
-}
-
-fn validate_player_position(
-    row: usize,
-    col: usize,
-    num_rows: usize,
-    num_cols: usize,
-    label: &str,
-) -> Result<()> {
-    if row >= num_rows || col >= num_cols {
+fn validate_player_index(idx: usize, num_cells: usize, label: &str) -> Result<()> {
+    if idx >= num_cells {
         bail!(
-            "{} player position ({}, {}) is out of bounds for {}x{} board",
+            "{} player index {} is out of bounds for {} cells",
             label,
-            row,
-            col,
-            num_rows,
-            num_cols
+            idx,
+            num_cells
         );
     }
 
     Ok(())
-}
-
-fn cell_index(row: usize, col: usize, num_cols: usize) -> usize {
-    row * num_cols + col
 }
 
 fn validate_linear_shapes(weight: &Array2<i64>, bias: &Array1<i64>) -> Result<()> {

@@ -25,8 +25,9 @@ class GameResult(Enum):
 
 class SpecialCase(Enum):
     ONE_TIE_ONE_WIN = auto()
-    DIFF_STEPS_TO_SAME_RESULT = auto()
-    OPPOSITE_RESULT = auto()
+    DIFF_STEPS_TO_SAME_DECISIVE_RESULT = auto()
+    OPPOSITE_DECISIVE_RESULT = auto()
+    GOING_FIRST_GOOD = auto()
 
 
 @dataclass(frozen=True)
@@ -119,7 +120,6 @@ def compare_results(
             if current_best_oracle.steps_to_result == new_oracle.steps_to_result:
                 return ResultComparison.EQUAL
 
-
     perspective_win = GameResult.HERO_WIN if is_hero else GameResult.OPPO_WIN
     perspective_loss = GameResult.OPPO_WIN if is_hero else GameResult.HERO_WIN
 
@@ -169,7 +169,6 @@ def oracle_minimax(
     context: MinimaxContext = None,
 ) -> OracleInfo:
 
-
     assert depth > 0, "Oracle minimax should not reach depth 0"
     assert context is not None, "Context must be passed"
 
@@ -189,7 +188,8 @@ def oracle_minimax(
     if status_info.status == GameStatus.TIE:
 
         oracle_info = OracleInfo(
-            GameResult.TIE, 0,
+            GameResult.TIE,
+            0,
         )
 
         return oracle_info
@@ -197,7 +197,11 @@ def oracle_minimax(
     elif status_info.status == GameStatus.WINNER:
 
         oracle_info = OracleInfo(
-            GameResult.HERO_WIN if status_info.winner_index == hero_index else GameResult.OPPO_WIN,
+            (
+                GameResult.HERO_WIN
+                if status_info.winner_index == hero_index
+                else GameResult.OPPO_WIN
+            ),
             0,
         )
 
@@ -213,14 +217,18 @@ def oracle_minimax(
 
             if oracle_info_lookup.hero_player == game_state.players[hero_index]:
                 assert oracle_info_lookup.hero_player == game_state.players[hero_index]
-                assert oracle_info_lookup.oppo_player == game_state.players[opponent_index]
+                assert (
+                    oracle_info_lookup.oppo_player == game_state.players[opponent_index]
+                )
 
                 # Perspective matches
                 return oracle_info_lookup
             else:
 
                 # Perspective swap
-                assert oracle_info_lookup.hero_player == game_state.players[opponent_index]
+                assert (
+                    oracle_info_lookup.hero_player == game_state.players[opponent_index]
+                )
                 assert oracle_info_lookup.oppo_player == game_state.players[hero_index]
 
                 return swap_perspective(oracle_info_lookup)
@@ -252,9 +260,7 @@ def oracle_minimax(
             if best_oracle_info is None:
                 best_oracle_info = oracle_info
             else:
-                compare_result = compare_results(
-                    best_oracle_info, oracle_info, is_hero
-                )
+                compare_result = compare_results(best_oracle_info, oracle_info, is_hero)
 
                 if compare_result == ResultComparison.BETTER:
                     best_oracle_info = oracle_info
@@ -265,9 +271,7 @@ def oracle_minimax(
 
         for i, oracle_info in enumerate(oracle_infos):
 
-            compare_result = compare_results(
-                best_oracle_info, oracle_info, is_hero
-            )
+            compare_result = compare_results(best_oracle_info, oracle_info, is_hero)
 
             move = Move(possible_directions[i], oracle_info.response)
 
@@ -322,9 +326,7 @@ def oracle_minimax(
             if best_oracle_info is None:
                 best_oracle_info = oracle_info
             else:
-                compare_result = compare_results(
-                    best_oracle_info, oracle_info, is_hero
-                )
+                compare_result = compare_results(best_oracle_info, oracle_info, is_hero)
 
                 if compare_result == ResultComparison.BETTER:
                     best_oracle_info = oracle_info
@@ -335,9 +337,7 @@ def oracle_minimax(
 
         for i, oracle_info in enumerate(oracle_infos):
 
-            compare_result = compare_results(
-                best_oracle_info, oracle_info, is_hero
-            )
+            compare_result = compare_results(best_oracle_info, oracle_info, is_hero)
 
             if compare_result == ResultComparison.EQUAL:
                 pvs.append(possible_directions[i])

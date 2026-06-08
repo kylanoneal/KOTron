@@ -74,6 +74,6 @@ class GameStatus(Enum):
 
 class PovGameResult(Enum):
 
-    WINNER = auto()
-    LOSER = auto()
+    WIN = auto()
+    LOSS = auto()
     TIE = auto()

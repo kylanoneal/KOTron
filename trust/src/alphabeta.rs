@@ -1,7 +1,6 @@
-use crate::tron_2d;
 use crate::{
     model::Model,
-    tron_2d::{Direction, GameState, GameStatus, PovGameState},
+    tron::{self, Direction, GameState, GameStatus, PovGameState},
 };
 
 #[derive(Debug, Clone)]
@@ -41,7 +40,7 @@ pub fn alphabeta(
     let maximizing_player = context.maximizing_player;
     let minimizing_player = context.minimizing_player;
 
-    let game_status = tron_2d::get_status(&game_state);
+    let game_status = tron::get_status(&game_state);
     match game_status.status {
         GameStatus::Tie => {
             return MinimaxResult {
@@ -70,11 +69,11 @@ pub fn alphabeta(
     }
 
     if is_maximizing_player {
-        let possible_directions = tron_2d::get_possible_directions(&game_state, maximizing_player);
+        let possible_directions = tron::get_possible_directions(&game_state, maximizing_player);
         // No available moves for maximizing player.
         if possible_directions.is_empty() {
             let opponent_possible_directions: Vec<Direction> =
-                tron_2d::get_possible_directions(&game_state, minimizing_player);
+                tron::get_possible_directions(&game_state, minimizing_player);
             if opponent_possible_directions.is_empty() {
                 return MinimaxResult {
                     evaluation: 0.0,
@@ -115,7 +114,7 @@ pub fn alphabeta(
             principal_variation: best_dir,
         }
     } else {
-        let possible_directions = tron_2d::get_possible_directions(&game_state, minimizing_player);
+        let possible_directions = tron::get_possible_directions(&game_state, minimizing_player);
         // If the minimizing player has no moves, it is a guaranteed win for the maximizer.
         if possible_directions.is_empty() {
             return MinimaxResult {
@@ -132,7 +131,7 @@ pub fn alphabeta(
             directions[maximizing_player] =
                 maximizing_player_move.expect("Maximizing player should always be passed here.");
             directions[minimizing_player] = direction;
-            child_states.push(tron_2d::next(&game_state, &directions));
+            child_states.push(tron::next(&game_state, &directions));
         }
 
         // Can do some sorting here

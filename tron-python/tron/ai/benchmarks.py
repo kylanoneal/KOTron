@@ -237,7 +237,7 @@ DECISIVE_5X5 = (
             opponent_index=1,
         ),
         steps_until_terminal=1,
-        hero_expected_result=PovGameResult.WINNER,
+        hero_expected_result=PovGameResult.WIN,
     ),
     ValueBenchmark(
         pov_game_state=PovGameState(
@@ -260,7 +260,7 @@ DECISIVE_5X5 = (
             opponent_index=1,
         ),
         steps_until_terminal=1,
-        hero_expected_result=PovGameResult.LOSER,
+        hero_expected_result=PovGameResult.LOSS,
     ),
     ValueBenchmark(
         pov_game_state=PovGameState(
@@ -283,7 +283,7 @@ DECISIVE_5X5 = (
             opponent_index=1,
         ),
         steps_until_terminal=2,
-        hero_expected_result=PovGameResult.WINNER,
+        hero_expected_result=PovGameResult.WIN,
     ),
     ValueBenchmark(
         pov_game_state=PovGameState(
@@ -306,7 +306,7 @@ DECISIVE_5X5 = (
             opponent_index=1,
         ),
         steps_until_terminal=2,
-        hero_expected_result=PovGameResult.LOSER,
+        hero_expected_result=PovGameResult.LOSS,
     ),
 )
 

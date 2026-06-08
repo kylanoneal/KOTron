@@ -208,13 +208,14 @@ def main():
         grid_search(run_dir, lr, batch_size, acc_dim, clamp_val, fc_neurons)
 
 
-def grid_search(run_dir: Path, _lr, _bs, _adim, _cval, _fcns):
+def grid_search(run_dir: Path, _lr, _bs, _adim, _cval, _fcns, _labelfn):
 
     LR = _lr
     BATCH_SIZE = _bs
     ACC_DIM = _adim
     CLAMP_VAL = _cval
     FC_NEURONS = _fcns
+    LABEL_FN = _labelfn
 
     MIN_DELTA = 0.0001
     PATIENCE = 50
