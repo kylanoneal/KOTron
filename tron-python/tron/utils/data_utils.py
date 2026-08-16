@@ -17,11 +17,12 @@ from tron.game import (
     GameStatus,
     StatusInfo,
     Direction,
-    from_2d_game_state,
     GameState2D,
     Player2D,
     PovGameState,
     get_possible_directions,
+    from_2d_game_state,
+    from_bitboard,
 )
 
 from tron.ai.tron_model import DummyTronModel
@@ -156,3 +157,49 @@ def label_every_gamestate(
     expected_num_gamestates(grid_dim)
 
     return oracle_table
+
+
+def pad_gamestate(
+    game: GameState, num_rows: int, num_cols: int, obstacle_density: float = 0.5
+):
+
+    old_rows, old_cols = game.num_rows, game.num_cols
+
+    if num_rows <= old_rows or num_cols <= old_cols:
+        raise ValueError()
+
+    row_offset = random.randint(0, num_rows - old_rows)
+    col_offset = random.randint(0, num_cols - old_cols)
+
+    game_2d = from_bitboard(game)
+
+    # Put walls around grid
+    one_padded_grid = np.ones((old_rows + 2, old_cols + 2), dtype=np.bool)
+    one_padded_grid[
+        1:-1,
+        1:-1,
+    ] = game_2d.grid
+
+    # Handle corners
+    one_padded_grid[0, 0] = np.random.rand(1) < obstacle_density
+    one_padded_grid[0, -1] = np.random.rand(1) < obstacle_density
+    one_padded_grid[-1, 0] = np.random.rand(1) < obstacle_density
+    one_padded_grid[-1, -1] = np.random.rand(1) < obstacle_density
+
+    # Initialize new grid with underlying pattern
+    pattern_grid = np.random.rand(num_rows + 2, num_cols + 2) < obstacle_density
+
+    # Paste original game grid
+    pattern_grid[row_offset : row_offset + old_rows + 2, col_offset + old_cols + 2] = (
+        one_padded_grid
+    )
+
+    # Remove outerwalls
+    new_grid = pattern_grid[1:-1, 1:-1]
+
+    new_players = [
+        Player2D(p.row + row_offset, p.col + col_offset, p.can_move)
+        for p in game_2d.players
+    ]
+
+    return from_2d_game_state(GameState2D(new_grid, new_players))

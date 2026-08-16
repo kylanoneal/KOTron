@@ -1,0 +1,446 @@
+from dataclasses import dataclass
+import math
+import random
+import numpy as np
+
+import torch
+from tqdm import tqdm
+from copy import deepcopy
+from typing import Optional
+
+import tron
+
+from tron.enums import PovGameResult
+from tron.ai.tron_model import TronModel, PovGameState
+from tron.game import (
+    GameState,
+    Direction,
+    GameStatus,
+    get_possible_directions,
+    next,
+    get_status,
+)
+from tron.ai.algos import choose_direction_random
+
+
+@dataclass
+class MctsContext:
+
+    hero_index: int
+    opponent_index: int
+    win_magnitude: float
+    model: TronModel
+    use_acc: bool
+
+
+def matrix_solve(model_evals: list[float], n_hero_moves: int, n_oppo_moves: int):
+
+    matrix = []
+
+    for i in range(n_hero_moves):
+
+        matrix_row = []
+
+        for j in range(n_oppo_moves):
+
+            matrix_row.append(model_evals[i * n_oppo_moves + j])
+
+        matrix.append(matrix_row)
+
+    # TODO: figure out how to matrix solve
+
+    return model_evals
+
+
+class Node:
+    def __init__(
+        self,
+        context: MctsContext,
+        game_state: GameState,
+        eval: float = None,
+        parent: Optional["Node"] = None,
+        acc: Optional[torch.tensor] = None,
+    ):
+
+        self.context = context
+        self.game_state = game_state
+        self.eval = eval
+        self.parent = parent
+        self.acc = acc
+
+        self.children = []
+        self.n_visits = 0
+        self.total_reward = eval
+        self.is_expanded = False
+
+    def expand(self):
+
+        assert len(self.children) == 0, "Only should be expanding a node once"
+        assert not self.is_expanded
+
+        self.is_expanded = True
+
+        assert (
+            get_status(self.game_state).status == GameStatus.IN_PROGRESS
+        ), "Hero states must be in progress"
+
+        hero_possible_directions = tron.get_possible_directions(
+            self.game_state, self.context.hero_index
+        )
+
+        oppo_possible_directions = tron.get_possible_directions(
+            self.game_state, self.context.opponent_index
+        )
+
+        # Check for a winner
+
+        hero_has_options = len(hero_possible_directions) > 0
+        oppo_has_options = len(oppo_possible_directions) > 0
+
+        if not hero_has_options or not oppo_has_options:
+
+            if not hero_has_options and oppo_has_options:
+
+                eval = -1.0
+                result = PovGameResult.LOSS
+
+            elif not oppo_has_options and hero_has_options:
+                eval = 1.0
+                result = PovGameResult.WIN
+            elif not hero_has_options and not oppo_has_options:
+                eval = 0.0
+                result = PovGameResult.TIE
+            else:
+                raise AssertionError()
+
+        else:
+            # No winner found, go deeper
+
+            # Steps:
+            #   - Make child game states
+            #   - Update accumulators, run NNUE, assign model inference vals
+            #   - Do matrix solve to assign actual evals
+
+            child_states = []
+
+            # Fill in matrix:
+
+            for i in range(len(hero_possible_directions)):
+
+                for j in range(len(oppo_possible_directions)):
+
+                    directions = [None, None]
+                    directions[self.context.hero_index] = hero_possible_directions[i]
+                    directions[self.context.opponent_index] = oppo_possible_directions[
+                        j
+                    ]
+
+                    child_states.append(
+                        tron.next(self.game_state, directions=tuple(directions))
+                    )
+
+            updated_accumulators = []
+            for child_state in child_states:
+
+                # Use accumulator eval
+                if self.context.use_acc:
+
+                    updated_accumulators.append(
+                        self.context.model.update_acc(
+                            prev_acc=self.parent.acc,
+                            prev_game_state=self.parent.game_state,
+                            next_pov_game_state=PovGameState(
+                                child_state,
+                                self.context.hero_index,
+                                self.context.opponent_index,
+                            ),
+                        )
+                    )
+
+                else:
+                    raise NotImplementedError()
+
+            model_evals = []
+
+            for updated_acc in updated_accumulators:
+
+                # TODO: This could be parallelized
+                model_evals.append(self.context.model.run_inference_acc(updated_acc))
+
+            matrix_solved_evals = matrix_solve(
+                model_evals,
+                len(hero_possible_directions),
+                len(oppo_possible_directions),
+            )
+
+            for i, matrix_eval in enumerate(matrix_solved_evals):
+
+                child_node = Node(
+                    self.context,
+                    child_states[i],
+                    eval=matrix_eval,
+                    parent=self,
+                    acc=updated_accumulators[i],
+                )
+
+                self.children.append(child_node)
+
+
+def find_best_leaf(node, exploration_factor) -> Node:
+    while len(node.children) > 0:
+        _, node = select(node, exploration_factor)
+    return node
+
+
+def select(node, exploration_factor):
+    best_value = float("-inf")
+    best_action = None
+    best_child = None
+
+    # print("\nSelecting child...")
+    for child in node.children:
+
+        # IF CHILD UNVISITED ALWAYS VISIT
+        # if child.n_visits == 0:
+        #     ucb1_value = float('inf')  # Encourage exploration
+        # else:
+
+        # Trying without above approach, adding 1 to child.n_visits in order to avoid divide by zero
+        curr_child_visits = child.n_visits + 1
+
+        # print(f"{child.is_hero=}, {child_eval=}")
+
+        exploitation_value = child.total_reward / curr_child_visits
+
+        exploration_value = exploration_factor * np.sqrt(
+            np.log(node.n_visits) / curr_child_visits
+        )
+
+        ucb1_value = exploitation_value + exploration_value
+
+        # print("Current best value: ", best_value, " current ucb1 value: ", ucb1_value)
+        if ucb1_value > best_value:
+            best_value = ucb1_value
+            best_action = child.prev_move
+            best_child = child
+    return best_action, best_child
+
+
+def count_depth_of_node(node) -> int:
+    count = 0
+    while node.parent:
+        count += 1
+        node = node.parent
+
+    return count
+
+
+def backpropagate(node):
+
+    node.n_visits += 1
+    reward = node.total_reward
+    is_hero_reward = node.is_hero
+
+    if node.is_hero:
+        assert reward == 0.0
+
+    while node.parent:
+        node = node.parent
+        node.n_visits += 1
+
+        if node.is_hero == is_hero_reward:
+            node.total_reward += reward
+        else:
+            node.total_reward -= reward
+
+
+def action_probabilities(node):
+
+    actions = []
+    visits = []
+    for child in node.children:
+        actions.append(child.prev_move)
+        visits.append(child.n_visits)
+
+    return actions, visits
+
+
+def search(
+    context: MctsContext,
+    game_state: GameState,
+    n_iterations: int,
+    temp: float,
+    exploration_factor: float = 2.0,
+    root: Optional[Node] = None,
+    initial_acc: Optional[torch.tensor] = None,
+) -> tuple[Direction, Node]:
+
+    if len(game_state.players) != 2:
+        raise NotImplementedError()
+
+    if root is None:
+        assert initial_acc is not None
+
+        root = Node(
+            context,
+            game_state,
+            is_hero=False,
+            prev_move=None,
+            eval=0.0,
+            acc=initial_acc,
+        )
+
+    else:
+        assert game_state == root.game_state
+        assert not root.is_hero
+        assert root.acc is not None
+        root.parent = None
+
+    for _ in range(root.n_visits, n_iterations):
+
+        leaf = find_best_leaf(root, exploration_factor)
+
+        if not leaf.is_expanded:
+            leaf.expand()
+        backpropagate(leaf)
+
+    return choose_direction(root, temp), root
+    # return action_probabilities(root)
+
+
+def choose_direction(node, temp=1.0) -> Direction:
+
+    if len(node.children) == 0:
+        return choose_direction_random(node.game_state, node.hero_index)
+
+    actions = []
+    visits = []
+
+    for child in node.children:
+        actions.append(child.prev_move)
+        visits.append(child.n_visits)
+
+    assert sum(visits) > 0
+
+    chosen_child_index = softmax_sample(visits, temp=temp)
+    hero_dir = actions[chosen_child_index]
+
+    return hero_dir
+
+
+def get_next_root(node: Node, hero_dir: Direction, oppo_dir: Direction) -> Node:
+
+    assert not node.is_hero
+
+    chosen_child = None
+    for child in node.children:
+
+        if child.prev_move == hero_dir:
+            chosen_child = child
+            break
+    else:
+        return None
+
+    chosen_grandchild = None
+
+    for grandchild in chosen_child.children:
+
+        if grandchild.prev_move == oppo_dir:
+            chosen_grandchild = grandchild
+            break
+
+    return chosen_grandchild
+
+
+# def get_move_pair(node, temp=1.0):
+
+#     opponent_index = 0 if node.hero_index == 1 else 1
+
+#     if len(node.children) == 0:
+#         return (choose_direction_random(node.game_state, node.hero_index), choose_direction_random(node.game_state, opponent_index), None)
+
+#     actions = []
+#     visits = []
+
+#     for child in node.children:
+#         actions.append(child.prev_move)
+#         visits.append(child.n_visits)
+
+
+#     assert sum(visits) > 0
+#     # print(f"\n\nHero:")
+#     # for action, visit_count, child in zip(actions, visits, node.children):
+
+#     #     print(f"{action.name:<12} {visit_count:<5} {round(child.total_reward, 3):<12}")  # left-align, width 12
+
+#     chosen_child_index = softmax_sample(visits, temp=temp)
+#     hero_dir = actions[chosen_child_index]
+
+#     child_node = node.children[chosen_child_index]
+#     assert child_node.is_hero
+
+#     actions = []
+#     visits = []
+
+#     for grandchild in child_node.children:
+#         actions.append(grandchild.prev_move)
+#         visits.append(grandchild.n_visits)
+
+#     if len(child_node.children) == 0 or sum(visits) == 0:
+#         return (hero_dir, choose_direction_random(node.game_state, opponent_index), None)
+
+#     # print(f"\n\nOpponent:")
+#     # for action, visit_count, child in zip(actions, visits, child_node.children):
+
+#     #     print(f"{action.name:<12} {visit_count:<5} {round(child.total_reward, 3):<12}")  # left-align, width 12
+
+
+#     chosen_grandchild_index = softmax_sample(visits, temp=temp)
+#     grandchild = child_node.children[chosen_grandchild_index]
+#     assert not grandchild.is_hero
+#     opponent_dir = actions[chosen_grandchild_index]
+
+
+#     return (hero_dir, opponent_dir, grandchild)
+
+
+def softmax_sample(visits: list[int], temp: float = 1.0) -> int:
+    """
+    Returns (chosen_index, probabilities) where
+        probabilities = softmax(logits / T)
+
+    temp  > 1.0  → flatter distribution (more exploration)
+    temp  < 1.0  → sharper distribution (more greedy)
+    """
+    if temp < 0:
+        raise ValueError("Temperature must be non-negative")
+
+    if temp == 0:
+
+        return visits.index(max(visits))
+
+    # numerically stable soft-max
+    # max_logit = max(logits)
+    # exps = [math.exp((l - max_logit) / temp) for l in logits]
+    # total = sum(exps)
+    # probs = [e / total for e in exps]
+
+    total_visits = sum(visits)
+    probs = [v / total_visits for v in visits]
+
+    exp = [p ** (1.0 / temp) for p in probs]
+    sum_exp = sum(exp)
+    temp_probs = [e / sum_exp for e in exp]
+
+    # print(f"Before temp {probs=}")
+    # print(f"\n{visits=}")
+    # print(f"Applied {temp=}, {temp_probs=}")
+    # randomly pick an index according to these probabilities
+    idx = random.choices(range(len(visits)), weights=temp_probs, k=1)[0]
+
+    # print(f"Picked: {idx}")
+    return idx
+
+
+if __name__ == "__main__":
+    print()
