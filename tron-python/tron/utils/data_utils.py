@@ -26,21 +26,13 @@ from tron.game import (
 )
 
 from tron.ai.tron_model import DummyTronModel
-from tron.ai.MINIMAX_ORACLE_SIMUL_MOVES import (
+
+
+from tron.ai.minimax_oracle_pessimistic import (
     MinimaxContext,
     OracleInfo,
     oracle_minimax,
 )
-from tron.ai.training import (
-    LabeledExample,
-    make_dataset,
-    get_label_magnitude,
-    ModelExample,
-)
-
-from tron.ai.benchmarks import Tactic
-
-from tron.utils.viz_utils import render_model_example_image
 
 DEPTH = 100
 
@@ -63,7 +55,7 @@ def expected_num_gamestates(grid_dim):
 
 def label_every_gamestate(
     grid_dim: int,
-) -> dict[GameState, OracleInfo]:
+):
 
     if grid_dim > 6 or grid_dim < 0:
 
@@ -73,11 +65,7 @@ def label_every_gamestate(
 
     n_squares = grid_dim * grid_dim
 
-    unique_gamestates = set()
-
     oracle_table = OrderedDict()
-
-    last_oracle_len = 0
 
     for i in tqdm(range(n_squares)):
 
@@ -118,39 +106,46 @@ def label_every_gamestate(
                     assert obstacle_grid[_r][_c] == 0
                     obstacle_grid[_r][_c] = 1
 
-                game = from_2d_game_state(
-                    GameState2D(
-                        grid=np.array(
-                            obstacle_grid,
-                            dtype=bool,
-                        ),
-                        players=(
+                for k in range(2):
+
+                    if k == 0:
+                        players = (
                             Player2D(i_row, i_col, True),
                             Player2D(j_row, j_col, True),
-                        ),
+                        )
+                    else:
+                        players = (
+                            Player2D(j_row, j_col, True),
+                            Player2D(i_row, i_col, True),
+                        )
+
+                    game = from_2d_game_state(
+                        GameState2D(
+                            grid=np.array(
+                                obstacle_grid,
+                                dtype=bool,
+                            ),
+                            players=players,
+                        )
                     )
-                )
 
-                if game in unique_gamestates:
-                    continue
+                    mm_context = MinimaxContext(
+                        model,
+                        hero_index=0,
+                        opponent_index=1,
+                        oracle_table=oracle_table,
+                    )
 
-                p1_mm_context = MinimaxContext(
-                    model,
-                    hero_index=0,
-                    opponent_index=1,
-                    oracle_table=oracle_table,
-                )
+                    root_oracle_info: OracleInfo = oracle_minimax(
+                        game, depth=DEPTH, is_hero=True, context=mm_context
+                    )
 
-                root_oracle_info: OracleInfo = oracle_minimax(
-                    game, depth=DEPTH, context=p1_mm_context
-                )
+                    # new_gs_explored = len(oracle_table) - last_oracle_len
 
-                # new_gs_explored = len(oracle_table) - last_oracle_len
+                    # if new_gs_explored > 2:
+                    #     print(f"{new_gs_explored=}")
 
-                # if new_gs_explored > 2:
-                #     print(f"{new_gs_explored=}")
-
-                # last_oracle_len = len(oracle_table)
+                    # last_oracle_len = len(oracle_table)
 
     print(f"Created oracle table with {len(oracle_table)} total entries.")
     print(f"Expected for grid dim {grid_dim}:")

@@ -25,29 +25,29 @@ class GameState:
     board: int
     players: tuple[Player]
 
-    def canonical_key(self):
+    # def canonical_key(self):
 
-        assert len(self.players) == 2
-        assert self.players[0].can_move and self.players[1].can_move
+    #     assert len(self.players) == 2
+    #     assert self.players[0].can_move and self.players[1].can_move
 
-        player_tup = (
-            (self.players[0].idx, self.players[1].idx)
-            if self.players[0].idx > self.players[1].idx
-            else (self.players[1].idx, self.players[0].idx)
-        )
+    #     player_tup = (
+    #         (self.players[0].idx, self.players[1].idx)
+    #         if self.players[0].idx > self.players[1].idx
+    #         else (self.players[1].idx, self.players[0].idx)
+    #     )
 
-        return (
-            self.num_rows,
-            self.num_cols,
-            self.board,
-            player_tup,
-        )
+    #     return (
+    #         self.num_rows,
+    #         self.num_cols,
+    #         self.board,
+    #         player_tup,
+    #     )
 
-    def __hash__(self):
-        return hash(self.canonical_key())
+    # def __hash__(self):
+    #     return hash(self.canonical_key())
 
-    def __eq__(self, other):
-        return self.canonical_key() == other.canonical_key()
+    # def __eq__(self, other):
+    #     return self.canonical_key() == other.canonical_key()
 
     # NOTE: Could add if __debug__ to skip this
     def __post_init__(self):
