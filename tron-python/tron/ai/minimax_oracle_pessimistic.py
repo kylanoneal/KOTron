@@ -18,16 +18,17 @@ from tron.ai.tron_model import TronModel, PovGameState
 
 
 class GameResult(Enum):
-    HERO_WIN = auto()
-    OPPO_WIN = auto()
-    TIE = auto()
+    P1_WIN = 1
+    P2_WIN = 2
+    TIE = 3
 
 
 class SpecialCase(Enum):
     ONE_TIE_ONE_WIN = auto()
     DIFF_STEPS_TO_SAME_DECISIVE_RESULT = auto()
+    DIFF_STEPS_TO_TIE = auto()
     OPPOSITE_DECISIVE_RESULT = auto()
-    GOING_FIRST_GOOD = auto()
+
 
 
 @dataclass(frozen=True)
@@ -44,13 +45,10 @@ class Move:
 
 
 @dataclass
-class OracleInfo:
+class OracleGameState:
+    game: GameState
     result: GameResult
     steps_to_result: int
-
-    # NOTE: Hero goes first, then opponent responds
-    hero_player: Optional[Player] = None
-    oppo_player: Optional[Player] = None
 
 
 @dataclass
@@ -58,7 +56,7 @@ class MinimaxContext:
     model: TronModel
     hero_index: int
     opponent_index: int
-    oracle_table: dict[GameState, OracleInfo]
+    oracle_table: dict[GameState, OracleGameState]
     win_magnitude: float = 10_000.0
 
     def __post_init__(self):
@@ -79,9 +77,9 @@ class ResultComparison(Enum):
 
 # NOTE: This could be done more cleverly
 def compare_results(
-    current_best_oracle: OracleInfo,
-    new_oracle: OracleInfo,
-    is_hero: bool,
+    current_best_oracle: OracleGameState,
+    new_oracle: OracleGameState,
+    is_p1: bool,
 ):
 
     # Handle equal results:
@@ -94,8 +92,8 @@ def compare_results(
             if current_best_oracle.steps_to_result == new_oracle.steps_to_result:
                 return ResultComparison.EQUAL
 
-    perspective_win = GameResult.HERO_WIN if is_hero else GameResult.OPPO_WIN
-    perspective_loss = GameResult.OPPO_WIN if is_hero else GameResult.HERO_WIN
+    perspective_win = GameResult.P1_WIN if is_p1 else GameResult.P2_WIN
+    perspective_loss = GameResult.P2_WIN if is_p1 else GameResult.P1_WIN
 
     # Win for hero
     if new_oracle.result == perspective_win:
@@ -141,7 +139,7 @@ def oracle_minimax(
     is_hero: bool,
     hero_move: Optional[Direction] = None,
     context: MinimaxContext = None,
-) -> OracleInfo:
+) -> OracleGameState:
 
     assert depth > 0, "Oracle minimax should not reach depth 0"
     assert context is not None, "Context must be passed"
@@ -154,6 +152,9 @@ def oracle_minimax(
     hero_index = context.hero_index
     opponent_index = context.opponent_index
 
+    assert hero_index == 0
+    assert opponent_index == 1
+
     status_info: StatusInfo = tron.get_status(game_state)
 
     if status_info.status != GameStatus.IN_PROGRESS:
@@ -161,7 +162,8 @@ def oracle_minimax(
 
     if status_info.status == GameStatus.TIE:
 
-        oracle_info = OracleInfo(
+        oracle_info = OracleGameState(
+            game_state,
             GameResult.TIE,
             0,
         )
@@ -170,11 +172,12 @@ def oracle_minimax(
 
     elif status_info.status == GameStatus.WINNER:
 
-        oracle_info = OracleInfo(
+        oracle_info = OracleGameState(
+            game_state,
             (
-                GameResult.HERO_WIN
+                GameResult.P1_WIN
                 if status_info.winner_index == hero_index
-                else GameResult.OPPO_WIN
+                else GameResult.P2_WIN
             ),
             0,
         )
@@ -189,8 +192,8 @@ def oracle_minimax(
 
         if oracle_info_lookup is not None:
 
-            assert oracle_info_lookup.hero_player == game_state.players[hero_index]
-            assert oracle_info_lookup.oppo_player == game_state.players[opponent_index]
+            # assert oracle_info_lookup.hero_player == game_state.players[hero_index]
+            # assert oracle_info_lookup.oppo_player == game_state.players[opponent_index]
 
             return oracle_info_lookup
 
@@ -202,7 +205,7 @@ def oracle_minimax(
             possible_directions if len(possible_directions) > 0 else [Direction.UP]
         )
 
-        best_oracle_info: OracleInfo = None
+        best_oracle_info: OracleGameState = None
 
         oracle_infos = []
 
@@ -226,11 +229,12 @@ def oracle_minimax(
                 if compare_result == ResultComparison.BETTER:
                     best_oracle_info = oracle_info
 
-        new_oracle_info = OracleInfo(
+        new_oracle_info = OracleGameState(
+            game_state,
             best_oracle_info.result,
             steps_to_result=best_oracle_info.steps_to_result + 1,
-            hero_player=game_state.players[hero_index],
-            oppo_player=game_state.players[opponent_index],
+            # hero_player=game_state.players[hero_index],
+            # oppo_player=game_state.players[opponent_index],
         )
         # Hero perspective updates oracle table
         context.oracle_table[game_state] = new_oracle_info
@@ -245,7 +249,7 @@ def oracle_minimax(
             possible_directions if len(possible_directions) > 0 else [Direction.UP]
         )
 
-        best_oracle_info: OracleInfo = None
+        best_oracle_info: OracleGameState = None
         oracle_infos = []
 
         for direction in possible_directions:
@@ -270,7 +274,8 @@ def oracle_minimax(
                 if compare_result == ResultComparison.BETTER:
                     best_oracle_info = oracle_info
 
-        new_oracle_info = OracleInfo(
+        new_oracle_info = OracleGameState(
+            None,
             best_oracle_info.result,
             steps_to_result=best_oracle_info.steps_to_result,
         )

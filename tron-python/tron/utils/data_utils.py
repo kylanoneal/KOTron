@@ -1,13 +1,15 @@
+import copy
 import random
 import imageio
 import numpy as np
+
 
 from math import comb
 from tqdm import tqdm
 from pathlib import Path
 from copy import deepcopy
-from collections import deque
-from itertools import combinations
+from collections import deque, defaultdict
+from itertools import combinations, product
 from collections import OrderedDict
 
 
@@ -26,15 +28,21 @@ from tron.game import (
 )
 
 from tron.ai.tron_model import DummyTronModel
+from tron.ai.benchmarks import Tactic
 
 
 from tron.ai.minimax_oracle_pessimistic import (
     MinimaxContext,
-    OracleInfo,
+    ResultComparison,
+    OracleGameState,
     oracle_minimax,
+    SpecialCase,
+    GameResult,
+    compare_results,
 )
 
 DEPTH = 100
+DUMMY_MODEL = DummyTronModel()
 
 
 def expected_num_gamestates(grid_dim):
@@ -53,105 +61,243 @@ def expected_num_gamestates(grid_dim):
     )
 
 
-def label_every_gamestate(
-    grid_dim: int,
-):
+def make_oracle_data(game: GameState) -> dict[GameState, OracleGameState]:
 
-    if grid_dim > 6 or grid_dim < 0:
+    h0_oracle_table = {}
 
-        raise ValueError("Not happening...")
+    mm_context = MinimaxContext(
+        DUMMY_MODEL,
+        hero_index=0,
+        opponent_index=1,
+        oracle_table=h0_oracle_table,
+    )
 
-    model = DummyTronModel()
+    # Populate h0 table
+    oracle_minimax(game, depth=DEPTH, is_hero=True, context=mm_context)
 
-    n_squares = grid_dim * grid_dim
+    game2 = swap_two_player_game(game)
 
-    oracle_table = OrderedDict()
+    h1_oracle_table = {}
 
-    for i in tqdm(range(n_squares)):
+    mm_context = MinimaxContext(
+        DUMMY_MODEL,
+        hero_index=0,
+        opponent_index=1,
+        oracle_table=h1_oracle_table,
+    )
 
-        for j in tqdm(range(i + 1, n_squares)):
+    # Populate h1 table
+    oracle_minimax(game2, depth=DEPTH, is_hero=True, context=mm_context)
 
-            assert j != i
+    special_cases = find_special_cases(h0_oracle_table, h1_oracle_table)
 
-            i_row, i_col = i // grid_dim, i % grid_dim
-            j_row, j_col = j // grid_dim, j % grid_dim
+    for special_case in special_cases.values():
 
-            grid = [[0] * grid_dim for _ in range(grid_dim)]
+        for h0_gs, h1_gs in special_case:
 
-            grid[i_row][i_col] = 1
+            del h0_oracle_table[h0_gs]
 
-            assert grid[j_row][j_col] == 0
-            grid[j_row][j_col] = 1
+    return h0_oracle_table, special_cases
 
-            zero_coords = []
 
-            for _row_idx, _row in enumerate(grid):
-                for _col_idx, _value in enumerate(_row):
-                    if _value == 0:
-                        zero_coords.append((_row_idx, _col_idx))
+# def label_every_gamestate(
+#     grid_dim: int,
+# ):
 
-            zero_coord_combos = [
-                combo
-                for r in range(1, len(zero_coords) + 1)
-                for combo in combinations(zero_coords, r)
-            ]
+#     if grid_dim > 6 or grid_dim < 0:
 
-            zero_coord_combos.insert(0, tuple([]))
+#         raise ValueError("Not happening...")
 
-            for obstacle_coords in zero_coord_combos:
 
-                obstacle_grid = deepcopy(grid)
+#     n_squares = grid_dim * grid_dim
 
-                for _r, _c in obstacle_coords:
-                    assert obstacle_grid[_r][_c] == 0
-                    obstacle_grid[_r][_c] = 1
+#     oracle_table = OrderedDict()
 
-                for k in range(2):
+#     for i in tqdm(range(n_squares)):
 
-                    if k == 0:
-                        players = (
-                            Player2D(i_row, i_col, True),
-                            Player2D(j_row, j_col, True),
-                        )
-                    else:
-                        players = (
-                            Player2D(j_row, j_col, True),
-                            Player2D(i_row, i_col, True),
-                        )
+#         for j in tqdm(range(i + 1, n_squares)):
 
-                    game = from_2d_game_state(
-                        GameState2D(
-                            grid=np.array(
-                                obstacle_grid,
-                                dtype=bool,
-                            ),
-                            players=players,
-                        )
-                    )
+#             assert j != i
 
-                    mm_context = MinimaxContext(
-                        model,
-                        hero_index=0,
-                        opponent_index=1,
-                        oracle_table=oracle_table,
-                    )
+#             i_row, i_col = i // grid_dim, i % grid_dim
+#             j_row, j_col = j // grid_dim, j % grid_dim
 
-                    root_oracle_info: OracleInfo = oracle_minimax(
-                        game, depth=DEPTH, is_hero=True, context=mm_context
-                    )
+#             grid = [[0] * grid_dim for _ in range(grid_dim)]
 
-                    # new_gs_explored = len(oracle_table) - last_oracle_len
+#             grid[i_row][i_col] = 1
 
-                    # if new_gs_explored > 2:
-                    #     print(f"{new_gs_explored=}")
+#             assert grid[j_row][j_col] == 0
+#             grid[j_row][j_col] = 1
 
-                    # last_oracle_len = len(oracle_table)
+#             zero_coords = []
 
-    print(f"Created oracle table with {len(oracle_table)} total entries.")
-    print(f"Expected for grid dim {grid_dim}:")
-    expected_num_gamestates(grid_dim)
+#             for _row_idx, _row in enumerate(grid):
+#                 for _col_idx, _value in enumerate(_row):
+#                     if _value == 0:
+#                         zero_coords.append((_row_idx, _col_idx))
 
-    return oracle_table
+#             zero_coord_combos = [
+#                 combo
+#                 for r in range(1, len(zero_coords) + 1)
+#                 for combo in combinations(zero_coords, r)
+#             ]
+
+#             zero_coord_combos.insert(0, tuple([]))
+
+#             for obstacle_coords in zero_coord_combos:
+
+#                 obstacle_grid = deepcopy(grid)
+
+#                 for _r, _c in obstacle_coords:
+#                     assert obstacle_grid[_r][_c] == 0
+#                     obstacle_grid[_r][_c] = 1
+
+#                 for k in range(2):
+
+#                     if k == 0:
+#                         players = (
+#                             Player2D(i_row, i_col, True),
+#                             Player2D(j_row, j_col, True),
+#                         )
+#                     else:
+#                         players = (
+#                             Player2D(j_row, j_col, True),
+#                             Player2D(i_row, i_col, True),
+#                         )
+
+#                     game = from_2d_game_state(
+#                         GameState2D(
+#                             grid=np.array(
+#                                 obstacle_grid,
+#                                 dtype=bool,
+#                             ),
+#                             players=players,
+#                         )
+#                     )
+
+#                     make_oracle_table(game, oracle_table)
+
+#                     # new_gs_explored = len(oracle_table) - last_oracle_len
+
+#                     # if new_gs_explored > 2:
+#                     #     print(f"{new_gs_explored=}")
+
+#                     # last_oracle_len = len(oracle_table)
+
+#     print(f"Created oracle table with {len(oracle_table)} total entries.")
+#     print(f"Expected for grid dim {grid_dim}:")
+#     expected_num_gamestates(grid_dim)
+
+#     return oracle_table
+
+
+def swap_two_player_game(game: GameState) -> GameState:
+
+    assert len(game.players) == 2
+
+    return GameState(
+        game.num_rows, game.num_cols, game.board, (game.players[1], game.players[0])
+    )
+
+
+def find_special_cases(h0_oracle_table, h1_oracle_table):
+
+    assert len(h0_oracle_table) == len(h1_oracle_table)
+
+    special_cases = defaultdict(list)
+
+    for h0_gs, h0_oi in h0_oracle_table.items():
+
+        h1_gs = swap_two_player_game(h0_gs)
+
+        h1_oi = h1_oracle_table[h1_gs]
+
+        n_ties = sum([oi.result == GameResult.TIE for oi in [h1_oi, h0_oi]])
+
+        # Special cases:
+
+        is_one_tie_one_win = n_ties == 1
+
+        is_opposite_decisive_result = (n_ties == 0) and (h0_oi.result == h1_oi.result)
+
+        is_diff_steps_to_same_decisive_result = (
+            (n_ties == 0)
+            and (h0_oi.result != h1_oi.result)
+            and (h0_oi.steps_to_result != h1_oi.steps_to_result)
+        )
+
+        is_diff_steps_to_tie = (n_ties == 2) and (
+            h0_oi.steps_to_result != h1_oi.steps_to_result
+        )
+
+        if is_one_tie_one_win:
+
+            ##########################################################
+            # Disambiguate case of one tie and one win:
+            #
+            #   - Assign speical case of one tie one win
+            #   - Store amount of steps to winning result
+            #   - Store h0 perspective winnner
+            #
+            # This special case indicates that 50% of the time this
+            # position results in a win and 50% of the time it results
+            # in a tie. To label this position, could divide win/loss
+            # label by two, but might confuse the model since there
+            # are such few cases of this.
+            ##########################################################
+
+            special_cases[SpecialCase.ONE_TIE_ONE_WIN].append((h0_gs, h1_gs))
+
+        elif is_opposite_decisive_result:
+
+            ##########################################################
+            # Disambiguate case of opposite decisive results
+            #
+            #   - Assign speical case of OPPOSITE_DECISIVE_RESULT
+            #
+            # Label this position with 0.0 since half the time you
+            # win and half the time you lose?
+            ##########################################################
+
+            special_cases[SpecialCase.OPPOSITE_DECISIVE_RESULT].append((h0_gs, h1_gs))
+
+        elif is_diff_steps_to_same_decisive_result:
+
+            ##########################################################
+            # Disambiguate case of different number of steps to the
+            # same decisive result
+            #
+            #   - Assign special case
+            #   - Store the greater steps to result
+            #
+            # This special case indicates that the same outcome is
+            # achieved but it might take longer to achieve it depending
+            # on who has the misfortune of going first. If a win can
+            # still be guaranteed when going first, that is the
+            # principal line which should take more steps
+            ##########################################################
+
+            special_cases[SpecialCase.DIFF_STEPS_TO_SAME_DECISIVE_RESULT].append(
+                (h0_gs, h1_gs)
+            )
+
+        else:
+
+            if is_diff_steps_to_tie:
+
+                ##########################################################
+                # Ties are always labeled 0, so doesn't matter how long
+                # it takes to tie. Minimax also has no preference on
+                # when it ties (unlike losses which it wants to delay, and
+                # wins it wants to expediate).
+                ##########################################################
+
+                special_cases[SpecialCase.DIFF_STEPS_TO_TIE].append((h0_gs, h1_gs))
+
+    n_each_special_case = {k: len(special_cases[k]) for k in special_cases.keys()}
+    print(f"{n_each_special_case=}")
+
+    return special_cases
 
 
 def pad_gamestate(
@@ -198,3 +344,131 @@ def pad_gamestate(
     ]
 
     return from_2d_game_state(GameState2D(new_grid, new_players))
+
+
+def make_tactics_from_oracle(
+    oracle_examples: list[OracleGameState], special_cases, n_tactics: int = 10
+):
+
+    # Convert flat data to dict
+
+    oracle_table = {o.game: o for o in oracle_examples}
+
+    # Flatten special cases
+
+    special_cases_set = set()
+
+    for special_instances in special_cases.values():
+
+        for instance_pair in special_instances:
+            special_cases_set.update(instance_pair)
+
+    # Find situations where one move is correct
+
+    tactics: list[Tactic] = []
+
+    items = list(oracle_table.items())
+    random.shuffle(items)
+
+    for gs, oracle_info in items:
+
+        if len(tactics) >= n_tactics:
+            break
+
+        expected_outcome = oracle_info.result
+
+        assert tron.get_status(gs).status == GameStatus.IN_PROGRESS
+
+        p1_possible_dirs = tron.get_possible_directions(gs, 0)
+        p2_possible_dirs = tron.get_possible_directions(gs, 1)
+
+        if len(p1_possible_dirs) < 2 or len(p2_possible_dirs) == 0:
+            continue
+
+        p1_moves_that_achieve_outcome = []
+        p2_responses = []
+
+        special_case_found = False
+
+        for p1_dir in p1_possible_dirs:
+
+            best_p2_outcome = None
+            best_p2_dir = None
+
+            for p2_dir in p2_possible_dirs:
+
+                next_gs = tron.next(gs, (p1_dir, p2_dir))
+
+                if not next_gs in oracle_table:
+
+                    if next_gs in special_cases_set:
+                        print(f"Found a special case, do not use this tactic")
+                        special_case_found = True
+                        break
+                    if next_gs.players[0] == next_gs.players[1]:
+                        print(f"Players colliding was only move here, skipping!")
+                        continue
+                    else:
+                        raise ValueError(f"wtf? {next_gs.players=}")
+
+                next_outcome = oracle_table[next_gs]
+
+                if best_p2_outcome is None:
+                    best_p2_outcome = next_outcome
+                    best_p2_dir = p2_dir
+                else:
+                    compare_result = compare_results(
+                        best_p2_outcome, next_outcome, is_p1=False
+                    )
+
+                    if compare_result == ResultComparison.BETTER:
+                        best_p2_outcome = next_outcome
+                        best_p2_dir = p2_dir
+
+            # Should only be None in the case of
+            # players colliding tie edge case or special cases
+            if best_p2_outcome is not None:
+                if best_p2_outcome.result == expected_outcome:
+                    p1_moves_that_achieve_outcome.append(p1_dir)
+                    p2_responses.append(best_p2_dir)
+
+        if len(p1_moves_that_achieve_outcome) == 1 and not special_case_found:
+
+            tactics.append(
+                Tactic(
+                    PovGameState(gs, 0, 1),
+                    opposing_dirs=p2_responses,
+                    expected_hero_dirs=p1_moves_that_achieve_outcome,
+                )
+            )
+
+    return tactics
+
+
+def subsample_and_augment(
+    oracle_examples: list[OracleGameState], keep_rate: float = 0.01
+):
+
+    shallow_copy = copy.copy(oracle_examples)
+    random.shuffle(shallow_copy)
+
+    keep_step = len(oracle_examples) // max(1, int((len(oracle_examples) * keep_rate)))
+
+    subsampled = shallow_copy[::keep_step]
+
+    for i in range(len(subsampled)):
+
+        augmented = GameState.transform(
+            subsampled[i].game,
+            do_lr_flip=random.random() > 0.5,
+            n_rot_90=random.randrange(0, 4),
+        )
+
+        subsampled[i] = OracleGameState(augmented, result=subsampled[i].result, steps_to_result=subsampled[i].steps_to_result)
+
+
+
+
+
+
+    return subsampled

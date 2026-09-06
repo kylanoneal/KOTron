@@ -3,6 +3,8 @@ from collections.abc import Sequence
 import tron.game as tron_game
 from tron.io import tron_pb2
 
+from tron.ai.minimax_oracle_pessimistic import OracleGameState, GameResult
+
 
 GameData = Sequence[Sequence[tron_game.GameState]]
 
@@ -111,6 +113,75 @@ def game_state_from_proto(game_state_pb: tron_pb2.GameState) -> tron_game.GameSt
         players=players,
     )
 
+
+def labeled_game_state_to_proto(
+    labeled_game_state: OracleGameState,
+    labeled_game_state_pb: tron_pb2.LabeledGameState | None = None,
+) -> tron_pb2.LabeledGameState:
+    """Convert a labeled game state to its protobuf message."""
+    if not isinstance(labeled_game_state, OracleGameState):
+        raise TypeError(
+            "labeled_game_state must be a LabeledGameState instance, "
+            f"got {type(labeled_game_state).__name__}"
+        )
+
+    if labeled_game_state_pb is None:
+        labeled_game_state_pb = tron_pb2.LabeledGameState()
+    else:
+        labeled_game_state_pb.Clear()
+
+    game_state_to_proto(
+        labeled_game_state.game,
+        labeled_game_state_pb.game_state,
+    )
+
+    labeled_game_state_pb.result = labeled_game_state.result.value
+    labeled_game_state_pb.steps_to_result = labeled_game_state.steps_to_result
+
+    return labeled_game_state_pb
+
+
+def labeled_game_state_from_proto(
+    labeled_game_state_pb: tron_pb2.LabeledGameState,
+) -> OracleGameState:
+    """Convert a protobuf message to a labeled game state."""
+
+    if labeled_game_state_pb.result == 0:
+        raise ValueError("Result should not be the unspecified value")
+    
+    return OracleGameState(
+        game=game_state_from_proto(labeled_game_state_pb.game_state),
+        result=GameResult(labeled_game_state_pb.result),
+        steps_to_result=labeled_game_state_pb.steps_to_result,
+    )
+
+
+def labeled_game_states_to_proto(
+    labeled_game_states: Sequence[OracleGameState],
+) -> bytes:
+    """Serialize labeled game states to protobuf bytes."""
+    labeled_game_states_pb = tron_pb2.LabeledGameStates()
+
+    for labeled_game_state in labeled_game_states:
+        labeled_game_state_to_proto(
+            labeled_game_state,
+            labeled_game_states_pb.labeled_states.add(),
+        )
+
+    return labeled_game_states_pb.SerializeToString()
+
+
+def labeled_game_states_from_proto(
+    serialized_data: bytes,
+) -> list[OracleGameState]:
+    """Deserialize protobuf bytes into labeled game states."""
+    labeled_game_states_pb = tron_pb2.LabeledGameStates()
+    labeled_game_states_pb.ParseFromString(serialized_data)
+
+    return [
+        labeled_game_state_from_proto(labeled_game_state_pb)
+        for labeled_game_state_pb in labeled_game_states_pb.labeled_states
+    ]
 
 def _unsigned_int_to_bytes(value: int) -> bytes:
     """Encode an unsigned integer as little-endian bytes.

@@ -129,7 +129,7 @@ def make_k_folds(
     return tuple(folds)
 
 
-def get_label_magnitude(pov_result: PovGameResult, steps_until_terminal: int):
+def get_label_magnitude(steps_until_terminal: int):
 
     assert steps_until_terminal >= 1
     assert isinstance(steps_until_terminal, int)
@@ -138,92 +138,92 @@ def get_label_magnitude(pov_result: PovGameResult, steps_until_terminal: int):
 
 
 
-def make_dataset(
-    game_data: tuple[tuple[GameState]],
-    batch_size: Optional[int] = None,
-    shuffle: bool = True,
-    include_ties=True,
-    do_affine=True,
-    keep_rate=0.5,
-) -> tuple[tuple[LabeledExample]]:
+# def make_dataset(
+#     game_data: tuple[tuple[GameState]],
+#     batch_size: Optional[int] = None,
+#     shuffle: bool = True,
+#     include_ties=True,
+#     do_affine=True,
+#     keep_rate=0.5,
+# ) -> tuple[tuple[LabeledExample]]:
 
-    dataset = []
+#     dataset = []
 
-    for game_states in game_data:
+#     for game_states in game_data:
 
-        terminal_status = tron.get_status(game_states[-1])
+#         terminal_status = tron.get_status(game_states[-1])
 
-        if not include_ties and terminal_status.status == GameStatus.TIE:
-            continue
+#         if not include_ties and terminal_status.status == GameStatus.TIE:
+#             continue
 
-        assert not terminal_status.status == GameStatus.IN_PROGRESS
+#         assert not terminal_status.status == GameStatus.IN_PROGRESS
 
-        if terminal_status.status == GameStatus.WINNER:
-            assert terminal_status.winner_index is not None
-            assert 0 <= terminal_status.winner_index < 2
-
-
-        # NOTE: Assumes 2 players
-        for player_index in range(2):
-
-            opponent_index = 0 if player_index == 1 else 1
-
-            # NOTE: DONT INCLUDE TERMINAL STATE!!!
-
-            num_active_turns = len(game_states) - 1
-            for i, game_state in enumerate(game_states[:-1]):
+#         if terminal_status.status == GameStatus.WINNER:
+#             assert terminal_status.winner_index is not None
+#             assert 0 <= terminal_status.winner_index < 2
 
 
-                assert len(game_state.players) == 2
-                assert tron.get_status(game_state).status == GameStatus.IN_PROGRESS
+#         # NOTE: Assumes 2 players
+#         for player_index in range(2):
 
-                if terminal_status.status == GameStatus.WINNER:
+#             opponent_index = 0 if player_index == 1 else 1
 
-                    steps_until_terminal = num_active_turns - i
+#             # NOTE: DONT INCLUDE TERMINAL STATE!!!
 
-                    assert steps_until_terminal >= 1
+#             num_active_turns = len(game_states) - 1
+#             for i, game_state in enumerate(game_states[:-1]):
 
-                    label = get_label_magnitude(steps_until_terminal)
 
-                    if terminal_status.winner_index != player_index:
-                        label *= -1
-                else:
-                    label = 0.0
+#                 assert len(game_state.players) == 2
+#                 assert tron.get_status(game_state).status == GameStatus.IN_PROGRESS
 
-                if random.random() < keep_rate:
+#                 if terminal_status.status == GameStatus.WINNER:
 
-                    game_state_to_add = (
-                        GameState.transform(
-                            game_state,
-                            do_lr_flip=random.random() > 0.5,
-                            n_rot_90=random.randrange(0, 4),
-                        )
-                        if do_affine
-                        else game_state
-                    )
+#                     steps_until_terminal = num_active_turns - i
 
-                    dataset.append(
-                        (
-                            LabeledExample(
-                                pov_game_state=PovGameState(
-                                    game_state_to_add,
-                                    hero_index=player_index,
-                                    opponent_index=opponent_index,
-                                ),
-                                label=label,
-                            )
-                        )
-                    )
+#                     assert steps_until_terminal >= 1
 
-    if shuffle:
-        random.shuffle(dataset)
+#                     label = get_label_magnitude(steps_until_terminal)
 
-    if batch_size is not None:
-        dataset = make_batches(
-            dataset, batch_size, shuffle=False
-        )  # Shuffle already handled
+#                     if terminal_status.winner_index != player_index:
+#                         label *= -1
+#                 else:
+#                     label = 0.0
 
-    return tuple(dataset)
+#                 if random.random() < keep_rate:
+
+#                     game_state_to_add = (
+#                         GameState.transform(
+#                             game_state,
+#                             do_lr_flip=random.random() > 0.5,
+#                             n_rot_90=random.randrange(0, 4),
+#                         )
+#                         if do_affine
+#                         else game_state
+#                     )
+
+#                     dataset.append(
+#                         (
+#                             LabeledExample(
+#                                 pov_game_state=PovGameState(
+#                                     game_state_to_add,
+#                                     hero_index=player_index,
+#                                     opponent_index=opponent_index,
+#                                 ),
+#                                 label=label,
+#                             )
+#                         )
+#                     )
+
+#     if shuffle:
+#         random.shuffle(dataset)
+
+#     if batch_size is not None:
+#         dataset = make_batches(
+#             dataset, batch_size, shuffle=False
+#         )  # Shuffle already handled
+
+#     return tuple(dataset)
 
 
 # def train(

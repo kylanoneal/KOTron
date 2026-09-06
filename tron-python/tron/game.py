@@ -312,6 +312,11 @@ def get_possible_directions(
 
     return available_directions
 
+def percent_board_filled(game: GameState) -> float:
+    num_cells = game.num_rows * game.num_cols
+    num_occupied = game.board.bit_count()
+    
+    return num_occupied / num_cells
 
 def from_2d_game_state(game: GameState2D) -> GameState:
 

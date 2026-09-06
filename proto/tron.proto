@@ -21,3 +21,21 @@ message Game {
 message Games {
   repeated Game games = 1;
 }
+
+
+enum GameResult {
+  GAME_RESULT_UNSPECIFIED = 0;
+  P1_WIN = 1;
+  P2_WIN = 2;
+  TIE = 3;
+}
+
+message LabeledGameState {
+  GameState game_state = 1;
+  GameResult result = 2;
+  int32 steps_to_result = 3;
+}
+
+message LabeledGameStates {
+  repeated LabeledGameState labeled_states = 1;
+}

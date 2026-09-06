@@ -14,8 +14,10 @@ class NnueTronModel(TronModel):
         num_cols: int,
         acc_dim: int,
         fc_layer_neuron_counts: tuple,  # (8, 16),
-        clamp_val: float,  # = 1.0,
+        clamp_val: int,
     ):
+
+        assert isinstance(clamp_val, int)
         super().__init__()
 
         self.num_rows = num_rows
