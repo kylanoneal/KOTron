@@ -1,6 +1,8 @@
 import numpy as np
 
+
 from typing import Optional
+from collections import deque
 from dataclasses import dataclass
 
 from tron.game_2d import GameState2D, Player2D
@@ -312,11 +314,75 @@ def get_possible_directions(
 
     return available_directions
 
+
 def percent_board_filled(game: GameState) -> float:
     num_cells = game.num_rows * game.num_cols
     num_occupied = game.board.bit_count()
-    
+
     return num_occupied / num_cells
+
+
+def percent_board_reachable(
+    game: GameState,
+    player_index: int,
+) -> tuple[float, bool]:
+    """Flood fill from a player's position.
+
+    Returns:
+        reachable_ratio:
+            Number of reachable open squares / total squares on the board.
+
+        other_player_reachable:
+            Whether the flood-fill region can reach the other player's position.
+    """
+    num_cells = game.num_rows * game.num_cols
+
+    player = game.players[player_index]
+    other_player = game.players[1 - player_index]
+
+    visited = {player.idx}
+    queue = deque([player.idx])
+
+    num_open = 0
+    other_player_reachable = False
+
+    while queue:
+        idx = queue.popleft()
+
+        row = idx // game.num_cols
+        col = idx % game.num_cols
+
+        neighbors = []
+
+        if row > 0:
+            neighbors.append(idx - game.num_cols)
+        if row < game.num_rows - 1:
+            neighbors.append(idx + game.num_cols)
+        if col > 0:
+            neighbors.append(idx - 1)
+        if col < game.num_cols - 1:
+            neighbors.append(idx + 1)
+
+        for next_idx in neighbors:
+            if next_idx in visited:
+                continue
+
+            # The opponent's square is occupied, but reaching it means
+            # the two players are in the same connected region.
+            if next_idx == other_player.idx:
+                other_player_reachable = True
+                continue
+
+            # Can't flood through occupied squares.
+            if get_bit(game.board, next_idx):
+                continue
+
+            visited.add(next_idx)
+            queue.append(next_idx)
+            num_open += 1
+
+    return num_open / num_cells, other_player_reachable
+
 
 def from_2d_game_state(game: GameState2D) -> GameState:
 

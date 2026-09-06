@@ -24,7 +24,7 @@ from tron.game import (
     Direction,
     next,
     get_possible_directions,
-    percent_board_filled
+    percent_board_reachable,
 )
 
 from tron.enums import PovGameResult
@@ -69,6 +69,7 @@ class CrossValContext:
     criterion: torch.nn.Module
     train_val_split: TrainValSplit
 
+
 from torch.utils.data import ConcatDataset, DataLoader, WeightedRandomSampler
 
 
@@ -100,10 +101,12 @@ def combine_dataloaders(
 
     combined_dataset = ConcatDataset([dataset_a, dataset_b])
 
-    sample_weights = torch.cat([
-        torch.full((n_a,), weight_a / n_a),
-        torch.full((n_b,), weight_b / n_b),
-    ])
+    sample_weights = torch.cat(
+        [
+            torch.full((n_a,), weight_a / n_a),
+            torch.full((n_b,), weight_b / n_b),
+        ]
+    )
 
     if num_samples is None:
         num_samples = n_a + n_b
@@ -119,6 +122,7 @@ def combine_dataloaders(
         batch_size=loader_a.batch_size,
         sampler=sampler,
     )
+
 
 # NOTE: Choosing not to include examples from both perspectives for now
 def dataloader_from_oracle(
@@ -200,6 +204,18 @@ def dataloader_from_oracle(
     return data_loader
 
 
+def start_oracle(game_state, trigger_ratio):
+
+    p1, _ = percent_board_reachable(game_state, 0)
+    p2, _ = percent_board_reachable(game_state, 1)
+
+    imminent_loss = p1 < 0.15 or p2 < 0.15
+
+    both_under_cutoff = p1 < trigger_ratio and p2 < trigger_ratio
+
+    return imminent_loss or both_under_cutoff
+
+
 def main():
 
     RUN_DESCRIPTION = "nnue_8x8_improved_metrics"
@@ -265,7 +281,7 @@ def grid_search(run_dir: Path, _lr, _bs, _adim, _cval, _fcns):
     PRE_TRAIN_EPOCHS = 0  # 50
 
     TRAIN_ITERS = 100_000
-    GAMES_PER_ITER = 4
+    GAMES_PER_ITER = 512
     CHECKPOINT_EVERY_N = 5
     PLAY_MATCH_EVERY_N = 20
     MAKE_VISUALIZATIONS_EVERY_N = 1_000
@@ -285,7 +301,7 @@ def grid_search(run_dir: Path, _lr, _bs, _adim, _cval, _fcns):
     P_OBSTACLES = 0.2  # 0.4
     OBSTACLE_DENSITY_RANGE = (0.0, 0.3)
 
-    ORACLE_CUTOFF_RATIO = 0.6
+    ORACLE_TRIGGER_REACHABLE_RATIO = 0.2
 
     print(f"Using device: {DEVICE}")
 
@@ -329,11 +345,12 @@ def grid_search(run_dir: Path, _lr, _bs, _adim, _cval, _fcns):
 
         bin_validation_oracle_examples = f.read()
 
-    validation_oracle_examples = labeled_game_states_from_proto(bin_validation_oracle_examples)
-
+    validation_oracle_examples = labeled_game_states_from_proto(
+        bin_validation_oracle_examples
+    )
 
     val_loader = dataloader_from_oracle(
-        model, validation_oracle_examples, batch_size=64
+        model, validation_oracle_examples, batch_size=64, keep_rate=0.01
     )
 
     ############################################
@@ -342,7 +359,8 @@ def grid_search(run_dir: Path, _lr, _bs, _adim, _cval, _fcns):
 
     # TODO: No need for matches / benchmark when you have the game solved
 
-    val_tactics = TacticGroup(read_tactics_json(VAL_TACTICS_PATH), "Validation tactics")
+    tactics_json = read_tactics_json(VAL_TACTICS_PATH)[::10]
+    val_tactics = TacticGroup(tactics_json, "Validation tactics")
 
     model_tactical_contexts = [
         model_d1_tbc := TacticalBenchmarkContext(
@@ -485,7 +503,7 @@ def grid_search(run_dir: Path, _lr, _bs, _adim, _cval, _fcns):
             game_steps = 0
 
             while (
-                percent_board_filled(game_state) < ORACLE_CUTOFF_RATIO
+                not start_oracle(game_state, ORACLE_TRIGGER_REACHABLE_RATIO)
                 and game_status.status == GameStatus.IN_PROGRESS
             ):
 
@@ -532,10 +550,10 @@ def grid_search(run_dir: Path, _lr, _bs, _adim, _cval, _fcns):
             oracle_info = oracle_table[game_state]
             game_prior_to_oracle = []
 
-            for i, gs in enumerate(current_game[:-1]):
+            for j, gs in enumerate(current_game[:-1]):
 
                 new_steps_to_result = oracle_info.steps_to_result + (
-                    len(current_game) - 1 - i
+                    len(current_game) - 1 - j
                 )
 
                 game_prior_to_oracle.append(
@@ -543,10 +561,12 @@ def grid_search(run_dir: Path, _lr, _bs, _adim, _cval, _fcns):
                 )
 
             assert sum([oi.game in oracle_table for oi in game_prior_to_oracle]) == 0
-            assert (
-                game_prior_to_oracle[-1].steps_to_result
-                == oracle_info.steps_to_result + 1
-            )
+
+            if len(game_prior_to_oracle) > 0:
+                assert (
+                    game_prior_to_oracle[-1].steps_to_result
+                    == oracle_info.steps_to_result + 1
+                )
 
             games_prior_to_oracle.append(game_prior_to_oracle)
 
@@ -616,46 +636,62 @@ def grid_search(run_dir: Path, _lr, _bs, _adim, _cval, _fcns):
         benchmark(
             i,
             tb_writer,
-            i % MAKE_VISUALIZATIONS_EVERY_N == 0,
+            make_visualizations=False,
             value_contexts=[
                 ValueBenchmarkContext(model, "non-quant model"),
                 ValueBenchmarkContext(quant_model, "quant model"),
             ],
             tactical_contexts=model_tactical_contexts + quant_model_tactical_contexts,
             match_contexts=match_contexts if i % PLAY_MATCH_EVERY_N == 0 else [],
-            tactic_groups=[val_tactics]
+            tactic_groups=[val_tactics],
         )
 
+        print(f"Creating dataloaders...")
+
+        flat_prior_to_oracle = [gs for g in games_prior_to_oracle for gs in g]
+        flat_oracle = [gs for g in oracle_games for gs in g]
+
+        print(f"{len(flat_prior_to_oracle)=}")
+        print(f"{len(flat_oracle)=}")
+
         prior_to_oracle_dataloader = dataloader_from_oracle(
-            model, [gs for g in games_prior_to_oracle for gs in g], batch_size=BATCH_SIZE, keep_rate=KEEP_RATE
+            model,
+            flat_prior_to_oracle,
+            batch_size=BATCH_SIZE,
+            keep_rate=1.0,
         )
 
         oracle_dataloader = dataloader_from_oracle(
-            model, [gs for g in oracle_games for gs in g], batch_size=BATCH_SIZE, keep_rate=0.01
+            model,
+            flat_oracle,
+            batch_size=BATCH_SIZE,
+            keep_rate=0.1,
         )
 
         print(f"{len(oracle_dataloader)=}, {len(prior_to_oracle_dataloader)=}")
 
-        combined_loader = combine_dataloaders(prior_to_oracle_dataloader, oracle_dataloader, weight_a=0.05, weight_b=0.95)
+        combined_loader = combine_dataloaders(
+            prior_to_oracle_dataloader, oracle_dataloader, weight_a=0.05, weight_b=0.95
+        )
 
         training_result = train(model, combined_loader, optimizer, criterion, epochs=1)
 
-
-
+        print(f"Validating...")
         avg_validation_loss = validate(
             model,
             val_loader,
             criterion,
         )
 
-
+        print("Done validating\n\n")
         model_tensorboard_update(
             i,
             tb_writer,
             model,
-            training_result,
+            model_desc="",
+            training_result=training_result,
             validation_loss=avg_validation_loss,
-            make_visualizations=i % MAKE_VISUALIZATIONS_EVERY_N == 0,
+            make_visualizations=False,
         )
 
         if i % CHECKPOINT_EVERY_N == 0:

@@ -347,12 +347,8 @@ def pad_gamestate(
 
 
 def make_tactics_from_oracle(
-    oracle_examples: list[OracleGameState], special_cases, n_tactics: int = 10
+    oracle_table: dict[GameState, OracleGameState], special_cases, n_tactics: int = 10
 ):
-
-    # Convert flat data to dict
-
-    oracle_table = {o.game: o for o in oracle_examples}
 
     # Flatten special cases
 
@@ -464,11 +460,10 @@ def subsample_and_augment(
             n_rot_90=random.randrange(0, 4),
         )
 
-        subsampled[i] = OracleGameState(augmented, result=subsampled[i].result, steps_to_result=subsampled[i].steps_to_result)
-
-
-
-
-
+        subsampled[i] = OracleGameState(
+            augmented,
+            result=subsampled[i].result,
+            steps_to_result=subsampled[i].steps_to_result,
+        )
 
     return subsampled

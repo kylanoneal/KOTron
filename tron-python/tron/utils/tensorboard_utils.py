@@ -1,5 +1,6 @@
 import random
 
+from tqdm import tqdm
 from dataclasses import dataclass
 from typing import Callable, Optional
 from torch.utils.tensorboard import SummaryWriter
@@ -37,7 +38,10 @@ from tron.ai.benchmarks import (
     run_value_benchmark,
 )
 
-from tron.utils.viz_utils import render_model_example_image, render_tactic_benchmark_image
+from tron.utils.viz_utils import (
+    render_model_example_image,
+    render_tactic_benchmark_image,
+)
 
 
 @dataclass
@@ -50,6 +54,7 @@ class ValueBenchmarkContext:
 class TacticalBenchmarkContext:
     dir_fn: Callable[[PovGameState], Direction]
     description: str
+
 
 @dataclass
 class TacticGroup:
@@ -90,7 +95,7 @@ def model_tensorboard_update(
     model_desc: str,
     training_result: TrainingResult,
     validation_loss: float,
-    make_visualizations: bool
+    make_visualizations: bool,
 ):
 
     print(
@@ -105,7 +110,7 @@ def model_tensorboard_update(
     tb_writer.add_scalar(f"weights_sos/{model_desc}", total_sos, i)
     tb_writer.add_scalar(f"avg_train_loss/{model_desc}", training_result.avg_loss, i)
     tb_writer.add_scalar(
-       f"avg_pred_magnitude/{model_desc}", training_result.avg_prediction_magnitude, i
+        f"avg_pred_magnitude/{model_desc}", training_result.avg_prediction_magnitude, i
     )
 
     tb_writer.add_scalar(f"avg_val_loss/{model_desc}", validation_loss, i)
@@ -146,7 +151,7 @@ def benchmark(
     value_contexts: list[ValueBenchmarkContext],
     tactical_contexts: list[TacticalBenchmarkContext],
     match_contexts: list[MatchContext],
-    tactic_groups: list[TacticGroup]
+    tactic_groups: list[TacticGroup],
 ):
     # # TODO: formalize
     # value_benchmark_info = [(TIES_5X5, "ties"), (DECISIVE_5X5, "decisive")]
@@ -178,11 +183,9 @@ def benchmark(
     #             f"Avg. Value Diff ({bench_description}) ({vc.description})", avg_diff, i
     #         )
 
-
-    for tc in tactical_contexts:
+    for tc in tqdm(tactical_contexts, "Running tactics..."):
 
         for tactic_group in tactic_groups:
-
 
             passes = fails = 0
 
